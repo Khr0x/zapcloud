@@ -8,4 +8,8 @@ repository.workspace = true
 [dependencies]
 zc-persistence.workspace = true
 zc-artifact-store.workspace = true
-zc-invocation.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+uuid.workspace = true

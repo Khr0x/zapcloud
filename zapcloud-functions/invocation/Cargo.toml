@@ -5,5 +5,28 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Contiene además el bin `echo_bootstrap`: un bootstrap `provided.al2023` trivial
+# (§16) usado por el test e2e como código de función real dentro de un ZIP. Vive
+# aquí para que el test lo localice con CARGO_BIN_EXE_echo_bootstrap.
+[[bin]]
+name = "echo_bootstrap"
+path = "src/bin/echo_bootstrap.rs"
+
 [dependencies]
-zc-executor-core.workspace = true
+# El `trait Executor` no se estabiliza hasta v0.8 (§37): en v0.1 se depende del
+# executor concreto (sandbox / process mode), no de `executor-core`.
+zc-executor-sandbox.workspace = true
+zc-persistence.workspace = true
+zc-artifact-store.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+# El bin `echo_bootstrap` es un cliente HTTP blocking del Runtime API.
+reqwest.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+serde_json.workspace = true
+zip.workspace = true

@@ -49,3 +49,27 @@ zc-executor-sandbox = { path = "zapcloud-functions/executor-sandbox" }
 zc-invocation = { path = "zapcloud-functions/invocation" }
 zc-function-manager = { path = "zapcloud-functions/function-manager" }
 zc-api-lambda = { path = "zapcloud-functions/api-lambda" }
+
+# Externos. Stack del RFC de Lambda §10 (Rust/Tokio/Axum/Serde).
+# Introducidos por el spike de v0.1 (loop Runtime API, §18); el workspace no
+# tenía dependencias externas hasta aquí.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time", "io-util", "fs"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+
+# Persistencia (§57, §58). Introducidos por el paso 2 (zc-persistence).
+# sqlite por defecto; el feature "migrate" embebe migrations/ (§45, §76).
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+
+# Artifact store (§14, §15): hashing de contenido. No reinventar crypto (§7, §32).
+sha2 = "0.10"
+hex = "0.4"
+
+# Desempaquetado de ZIP de funciones (§16). Introducido por el paso 5
+# (zc-invocation): monta el artifact real en el task_root del environment.
+zip = { version = "2", default-features = false, features = ["deflate"] }

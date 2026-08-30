@@ -5,5 +5,23 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Contiene además el bin `bootstrap_spike`: un bootstrap `provided.al2023`
+# trivial (§16 paso 1) usado por el spike del loop Runtime API (§18). Vive aquí
+# para que el test e2e lo localice con CARGO_BIN_EXE_bootstrap_spike.
+[[bin]]
+name = "bootstrap_spike"
+path = "src/bin/bootstrap_spike.rs"
+
 [dependencies]
 zc-executor-core.workspace = true
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+# El bootstrap (bin) es un cliente HTTP blocking del Runtime API.
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+serde_json.workspace = true
