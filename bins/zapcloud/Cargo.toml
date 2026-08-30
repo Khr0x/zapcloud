@@ -1,0 +1,20 @@
+[package]
+name = "zapcloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Binario combinado del ecosistema (el "cloud-server start", §13).
+# Hoy sólo ensambla el servicio Functions; al añadir events/workflows se
+# enchufan aquí (o se emiten binarios por servicio en bins/ si se desea).
+[[bin]]
+name = "zapcloud"
+path = "src/main.rs"
+
+[dependencies]
+zc-config.workspace = true
+zc-telemetry.workspace = true
+zc-api-lambda.workspace = true
+zc-function-manager.workspace = true
+zc-executor-sandbox.workspace = true

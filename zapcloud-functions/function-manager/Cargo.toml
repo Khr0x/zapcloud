@@ -1,0 +1,11 @@
+[package]
+name = "zc-function-manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+zc-persistence.workspace = true
+zc-artifact-store.workspace = true
+zc-invocation.workspace = true
