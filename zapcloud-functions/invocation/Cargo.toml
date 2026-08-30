@@ -1,0 +1,9 @@
+[package]
+name = "zc-invocation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+zc-executor-core.workspace = true

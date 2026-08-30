@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Automatización de repo (patrón cargo-xtask): construir runtime bundles de
+# forma reproducible con SBOM + manifiesto de licencias (§16-17), correr los
+# golden tests (§70), etc. Se invoca con `cargo run -p xtask -- <tarea>`.
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]

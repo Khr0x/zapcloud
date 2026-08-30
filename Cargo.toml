@@ -1,0 +1,51 @@
+# zapcloud — monorepo (Cargo workspace) del ecosistema.
+# Ver docs/rfc/zapcloud.md (§13 ecosistema) y docs/rfc/lambda-zapcloud.md (§11 estructura).
+#
+# Regla de dependencias del workspace:
+#   shared/*                  no depende de ningún proyecto (kernel transversal)
+#   zapcloud-<servicio>/*     depende de shared/*, NO de otros servicios
+#   bins/*                    ensamblan un servicio (o varios) en un binario
+#
+# v0.1 = solo Functions. Añadir un servicio nuevo = una carpeta + una línea aquí.
+[workspace]
+resolver = "2"
+members = [
+    # --- kernel compartido (shared) ---
+    "shared/zc-aws-protocol",   # SigV4, errores AWS, ARN   (§54, §71, §56)
+    "shared/zc-persistence",    # SQLite -> Postgres         (§57)
+    "shared/zc-artifact-store", # blobs content-addressed    (§14-15)
+    "shared/zc-config",         # tenant_trust, memory_budget, doctor (§64)
+    "shared/zc-telemetry",      # OTel + Prometheus + logs   (§59-61)
+
+    # --- proyecto: zapcloud-functions (el "lambda-server", §11) ---
+    "zapcloud-functions/api-lambda",         # AWS strict /2015-03-31/* (§12)
+    "zapcloud-functions/function-manager",   # CRUD + metadata (§13)
+    "zapcloud-functions/invocation",         # sync/async (§43-45)
+    "zapcloud-functions/executor-core",      # trait Executor — INESTABLE hasta v0.8 (§37)
+    "zapcloud-functions/executor-sandbox",   # único executor obligatorio en v1 (§37)
+
+    # --- binario combinado (el "cloud-server start", §13) ---
+    "bins/zapcloud",
+
+    # --- utilidades de build (bundles, reproducibilidad, CI) ---
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/khrox20/zapcloud"
+
+[workspace.dependencies]
+# Internos (path). Se referencian con `<crate>.workspace = true` en cada miembro.
+zc-aws-protocol = { path = "shared/zc-aws-protocol" }
+zc-persistence = { path = "shared/zc-persistence" }
+zc-artifact-store = { path = "shared/zc-artifact-store" }
+zc-config = { path = "shared/zc-config" }
+zc-telemetry = { path = "shared/zc-telemetry" }
+zc-executor-core = { path = "zapcloud-functions/executor-core" }
+zc-executor-sandbox = { path = "zapcloud-functions/executor-sandbox" }
+zc-invocation = { path = "zapcloud-functions/invocation" }
+zc-function-manager = { path = "zapcloud-functions/function-manager" }
+zc-api-lambda = { path = "zapcloud-functions/api-lambda" }
