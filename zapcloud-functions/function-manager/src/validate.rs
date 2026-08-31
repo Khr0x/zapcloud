@@ -4,6 +4,8 @@
 //! Los límites son los valores AWS `strict` (§35); en el paso 8 pasarán a ser
 //! configurables vía `[compat]` (§64). Errores como dominio, no framing HTTP.
 
+use std::io::Cursor;
+use std::path::Path;
 use std::str::FromStr;
 
 use crate::ManagerError;
@@ -17,10 +19,12 @@ pub const TIMEOUT_MIN_S: i64 = 1;
 pub const TIMEOUT_MAX_S: i64 = 900;
 /// Zip subido directamente (§35). El descomprimido (250 MB) se valida al extraer.
 pub const MAX_ZIP_BYTES: usize = 50 * 1024 * 1024;
+const MAX_UNPACKED_BYTES: u64 = 250 * 1024 * 1024;
+const BOOTSTRAP_NAME: &str = "bootstrap";
 
 /// Runtimes del carril Compatibility aceptados en la ruta AWS (§7, §38, §39).
 /// `wasm32-wasi` NO está: es carril Native, solo por `/api/*` (§39).
-pub const AWS_COMPATIBLE_RUNTIMES: &[&str] = &["provided.al2023", "nodejs22.x", "python3.13"];
+pub const ENABLED_RUNTIMES: &[&str] = &["provided.al2023"];
 
 /// Arquitecturas soportadas (§7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,14 +106,14 @@ pub fn validate_name(name: &str) -> Result<(), ManagerError> {
 }
 
 pub fn validate_runtime(runtime: &str) -> Result<(), ManagerError> {
-    if AWS_COMPATIBLE_RUNTIMES.contains(&runtime) {
+    if ENABLED_RUNTIMES.contains(&runtime) {
         Ok(())
     } else {
         Err(ManagerError::InvalidParameter {
             field: "runtime",
             message: format!(
-                "runtime no reconocido: {runtime} (soportados: {})",
-                AWS_COMPATIBLE_RUNTIMES.join(", ")
+                "runtime no disponible en v0.1: {runtime} (habilitados: {})",
+                ENABLED_RUNTIMES.join(", ")
             ),
         })
     }
@@ -132,7 +136,9 @@ pub fn validate_timeout(timeout: i64) -> Result<(), ManagerError> {
     } else {
         Err(ManagerError::InvalidParameter {
             field: "timeout",
-            message: format!("timeout fuera de rango: {timeout} (permitido {TIMEOUT_MIN_S}–{TIMEOUT_MAX_S} s)"),
+            message: format!(
+                "timeout fuera de rango: {timeout} (permitido {TIMEOUT_MIN_S}–{TIMEOUT_MAX_S} s)"
+            ),
         })
     }
 }
@@ -159,6 +165,55 @@ pub fn validate_zip_size(len: usize) -> Result<(), ManagerError> {
     }
 }
 
+/// Valida el paquete `provided.al2023` antes de persistirlo. La extracción
+/// vuelve a aplicar estas defensas porque ambos puntos son fronteras de datos.
+pub fn validate_deployment_zip(code: &[u8]) -> Result<(), ManagerError> {
+    validate_deployment_zip_with_limit(code, MAX_UNPACKED_BYTES)
+}
+
+fn validate_deployment_zip_with_limit(
+    code: &[u8],
+    max_unpacked_bytes: u64,
+) -> Result<(), ManagerError> {
+    let invalid = |message: String| ManagerError::InvalidParameter {
+        field: "code",
+        message,
+    };
+    let mut archive = zip::ZipArchive::new(Cursor::new(code))
+        .map_err(|e| invalid(format!("el artifact no es un ZIP válido: {e}")))?;
+    let mut total = 0_u64;
+    let mut has_bootstrap = false;
+
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|e| invalid(format!("no se pudo leer una entrada del ZIP: {e}")))?;
+        let path = entry.enclosed_name().ok_or_else(|| {
+            invalid(format!(
+                "entrada de ZIP con ruta insegura: {}",
+                entry.name()
+            ))
+        })?;
+
+        if !entry.is_dir() {
+            total = total.saturating_add(entry.size());
+            if total > max_unpacked_bytes {
+                return Err(invalid(format!(
+                    "el paquete descomprimido supera el límite de {max_unpacked_bytes} bytes"
+                )));
+            }
+            has_bootstrap |= path == Path::new(BOOTSTRAP_NAME);
+        }
+    }
+
+    if !has_bootstrap {
+        return Err(invalid(format!(
+            "el ZIP no contiene `{BOOTSTRAP_NAME}` en la raíz"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,15 +237,18 @@ mod tests {
     #[test]
     fn runtime_solo_aws_compatibles() {
         assert!(validate_runtime("provided.al2023").is_ok());
-        assert!(validate_runtime("nodejs22.x").is_ok());
-        assert!(validate_runtime("python3.13").is_ok());
+        assert!(validate_runtime("nodejs22.x").is_err());
+        assert!(validate_runtime("python3.13").is_err());
         assert!(validate_runtime("wasm32-wasi").is_err());
         assert!(validate_runtime("cobol").is_err());
     }
 
     #[test]
     fn arch_y_package_type_parsean() {
-        assert_eq!("arm64".parse::<Architecture>().unwrap(), Architecture::Arm64);
+        assert_eq!(
+            "arm64".parse::<Architecture>().unwrap(),
+            Architecture::Arm64
+        );
         assert!("sparc".parse::<Architecture>().is_err());
         assert_eq!("Zip".parse::<PackageType>().unwrap(), PackageType::Zip);
         assert!("Tarball".parse::<PackageType>().is_err());
@@ -203,7 +261,10 @@ mod tests {
         assert!(validate_name("bad/name").is_err(), "slash");
         assert!(validate_name("mi función").is_err(), "espacio/acento");
         assert!(validate_name("ok-name_1").is_ok());
-        assert!(validate_name(&"x".repeat(64)).is_ok(), "64 chars es el borde");
+        assert!(
+            validate_name(&"x".repeat(64)).is_ok(),
+            "64 chars es el borde"
+        );
     }
 
     #[test]
@@ -217,5 +278,31 @@ mod tests {
     fn zip_en_el_borde() {
         assert!(validate_zip_size(MAX_ZIP_BYTES).is_ok());
         assert!(validate_zip_size(MAX_ZIP_BYTES + 1).is_err());
+    }
+
+    fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            for (name, bytes) in entries {
+                writer
+                    .start_file(*name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn deployment_zip_exige_bootstrap_y_limite_descomprimido() {
+        assert!(validate_deployment_zip(&zip(&[("bootstrap", b"ok")])).is_ok());
+        assert!(validate_deployment_zip(&zip(&[("index.js", b"no")])).is_err());
+        assert!(validate_deployment_zip_with_limit(&zip(&[("bootstrap", b"1234")]), 3).is_err());
+        assert!(validate_deployment_zip(b"no-es-zip").is_err());
+        assert!(validate_deployment_zip(&zip(&[("../bootstrap", b"bad")])).is_err());
     }
 }

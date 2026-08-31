@@ -70,7 +70,26 @@ impl ArtifactStore {
 
     /// ¿Existe ya el blob de este hash?
     pub async fn exists(&self, sha256: &str) -> bool {
-        tokio::fs::try_exists(self.path(sha256)).await.unwrap_or(false)
+        tokio::fs::try_exists(self.path(sha256))
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Comprueba que el directorio del store sigue disponible.
+    pub async fn healthy(&self) -> bool {
+        let directory = self.path("");
+        if !tokio::fs::try_exists(&directory).await.unwrap_or(false) {
+            return false;
+        }
+        let probe = directory.join(format!(".health-{}", Uuid::new_v4()));
+        let writable = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+            .await
+            .is_ok();
+        let _ = tokio::fs::remove_file(probe).await;
+        writable
     }
 
     /// Guarda `bytes` bajo su SHA256. Si ya existe, no reescribe (dedup, §15).
@@ -81,7 +100,11 @@ impl ArtifactStore {
         let size = bytes.len() as i64;
 
         if tokio::fs::try_exists(&final_path).await? {
-            return Ok(StoredArtifact { sha256, size, path: final_path });
+            return Ok(StoredArtifact {
+                sha256,
+                size,
+                path: final_path,
+            });
         }
 
         // Temp en el mismo dir que el destino → rename atómico (misma fs).
@@ -106,7 +129,7 @@ impl ArtifactStore {
                     return Err(e.into());
                 }
             }
-        }
+        };
 
         // fsync del directorio: persiste la propia entrada (el rename). Best-effort
         // — algunas plataformas no permiten abrir un dir como File.
@@ -114,7 +137,21 @@ impl ArtifactStore {
             let _ = dir_handle.sync_all().await;
         }
 
-        Ok(StoredArtifact { sha256, size, path: final_path })
+        Ok(StoredArtifact {
+            sha256,
+            size,
+            path: final_path,
+        })
+    }
+
+    /// Elimina un blob que una operación fallida dejó sin referencias. El
+    /// llamador debe comprobar antes que no existe una referencia persistida.
+    pub async fn remove(&self, sha256: &str) -> Result<()> {
+        match tokio::fs::remove_file(self.path(sha256)).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// Lee el blob de un hash.

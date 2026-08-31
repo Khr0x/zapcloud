@@ -33,7 +33,9 @@ async fn put_calcula_sha256_y_layout() {
     assert_eq!(stored.sha256, HELLO_SHA256);
     assert_eq!(stored.size, 5);
     // Layout §14: <root>/sha256/<hash>
-    assert!(stored.path.ends_with(PathBuf::from("sha256").join(HELLO_SHA256)));
+    assert!(stored
+        .path
+        .ends_with(PathBuf::from("sha256").join(HELLO_SHA256)));
     assert!(store.exists(HELLO_SHA256).await);
 }
 
@@ -69,4 +71,18 @@ async fn verify_detecta_corrupcion() {
     tokio::fs::write(&stored.path, b"tampered").await.unwrap();
     let err = store.verify(&stored.sha256).await;
     assert!(matches!(err, Err(ArtifactError::IntegrityMismatch(_))));
+}
+
+#[tokio::test]
+async fn healthy_detecta_store_no_escribible() {
+    let dir = TempDir::new();
+    let store = ArtifactStore::open(&dir.0).await.expect("open");
+    assert!(store.healthy().await);
+
+    let sha_dir = dir.0.join("sha256");
+    tokio::fs::remove_dir_all(&sha_dir).await.unwrap();
+    tokio::fs::write(&sha_dir, b"not a directory")
+        .await
+        .unwrap();
+    assert!(!store.healthy().await);
 }

@@ -19,10 +19,12 @@ pub mod models;
 use std::str::FromStr;
 use std::time::Duration;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 
-pub use functions::UpdateCodeResult;
-pub use models::{Artifact, Function, NewArtifact, NewFunction};
+pub use functions::{UpdateCodeResult, UpdateCodeWithArtifactResult};
+pub use models::{Artifact, Function, FunctionWithArtifact, NewArtifact, NewFunction};
 
 /// Migraciones embebidas en el binario desde `migrations/` en la raíz del
 /// repo (feature `migrate` de sqlx). Ruta relativa al Cargo.toml de este crate.
@@ -36,6 +38,8 @@ pub enum PersistenceError {
     Database(#[from] sqlx::Error),
     #[error("error de migración: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("la función ya existe: {0}")]
+    FunctionNameConflict(String),
 }
 
 pub type Result<T> = std::result::Result<T, PersistenceError>;
@@ -77,6 +81,12 @@ impl Database {
     pub async fn migrate(&self) -> Result<()> {
         MIGRATOR.run(&self.pool).await?;
         Ok(())
+    }
+
+    /// Consulta mínima para readiness del servidor.
+    pub async fn healthy(&self) -> Result<bool> {
+        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        Ok(true)
     }
 
     /// Pool subyacente, para los módulos de repositorio de este crate.

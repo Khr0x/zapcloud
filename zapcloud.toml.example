@@ -1,0 +1,19 @@
+[server]
+listen = "127.0.0.1:9000"
+region = "local-1"
+
+[storage]
+metadata = "sqlite://./data/zapcloud.db"
+artifacts = "./data/artifacts"
+
+[security]
+tenant_trust = "trusted"
+
+[executor]
+default = "process"
+
+[auth]
+mode = "none"
+
+[telemetry]
+prometheus = true

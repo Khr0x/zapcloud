@@ -27,6 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -73,12 +74,32 @@ pub struct Environment {
     child: Child,
 }
 
+impl Environment {
+    /// Mata el proceso asociado mientras el environment permanece bajo su lock.
+    pub async fn terminate(&mut self) -> Result<()> {
+        self.child.kill().await.context("kill del bootstrap")?;
+        Ok(())
+    }
+}
+
 /// Una invocación en vuelo: el payload a entregar y por dónde devolver el
 /// resultado (o el error) al llamador de `invoke`.
 struct Invocation {
-    payload: String,
-    respond_to: oneshot::Sender<std::result::Result<String, String>>,
+    payload: Vec<u8>,
+    respond_to: InvocationSender,
 }
+
+/// Resultado observable de ejecutar el handler. Un error de función no es un
+/// fallo del executor: la API Lambda lo devuelve con HTTP 200 y un header
+/// `X-Amz-Function-Error` (§43, §71).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvokeOutcome {
+    Success(Vec<u8>),
+    FunctionError(Vec<u8>),
+}
+
+type InvocationSender = oneshot::Sender<InvokeOutcome>;
+type PendingInvocations = HashMap<String, InvocationSender>;
 
 /// Estado compartido entre los handlers HTTP del Runtime API.
 #[derive(Clone)]
@@ -86,7 +107,7 @@ struct RuntimeApiState {
     /// Cola de invocaciones pendientes; `/next` hace long-poll aquí.
     incoming: Arc<Mutex<mpsc::Receiver<Invocation>>>,
     /// request_id -> canal por el que devolver la respuesta de esa invocación.
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<std::result::Result<String, String>>>>>,
+    pending: Arc<Mutex<PendingInvocations>>,
     /// Generador monótono de request ids.
     seq: Arc<AtomicU64>,
 }
@@ -99,7 +120,19 @@ pub struct ProcessExecutor {
     _server: tokio::task::JoinHandle<()>,
 }
 
+impl Drop for ProcessExecutor {
+    fn drop(&mut self) {
+        self._server.abort();
+    }
+}
+
 impl ProcessExecutor {
+    /// Comprueba que el runtime process puede abrir su servidor Runtime API.
+    /// No lanza ningún bootstrap ni conserva estado.
+    pub async fn available() -> bool {
+        Self::start().await.is_ok()
+    }
+
     /// Levanta el servidor Runtime API en `127.0.0.1:0` (puerto efímero) y
     /// devuelve el executor listo para `create`/`invoke`.
     pub async fn start() -> Result<Self> {
@@ -154,11 +187,20 @@ impl ProcessExecutor {
             // Lo esencial: dónde hace poll el runtime (§16, §18).
             .env("AWS_LAMBDA_RUNTIME_API", self.addr.to_string())
             .env("_HANDLER", &spec.handler)
-            .env("LAMBDA_TASK_ROOT", spec.task_root.to_string_lossy().as_ref())
-            .env("LAMBDA_RUNTIME_DIR", spec.runtime_dir.to_string_lossy().as_ref())
+            .env(
+                "LAMBDA_TASK_ROOT",
+                spec.task_root.to_string_lossy().as_ref(),
+            )
+            .env(
+                "LAMBDA_RUNTIME_DIR",
+                spec.runtime_dir.to_string_lossy().as_ref(),
+            )
             .env("AWS_LAMBDA_FUNCTION_NAME", &spec.function_name)
             .env("AWS_LAMBDA_FUNCTION_VERSION", "$LATEST")
-            .env("AWS_LAMBDA_FUNCTION_MEMORY_SIZE", spec.memory_size.to_string())
+            .env(
+                "AWS_LAMBDA_FUNCTION_MEMORY_SIZE",
+                spec.memory_size.to_string(),
+            )
             .env("AWS_LAMBDA_LOG_GROUP_NAME", &spec.log_group)
             .env("AWS_LAMBDA_LOG_STREAM_NAME", &spec.log_stream)
             .env("AWS_REGION", &spec.region)
@@ -174,29 +216,26 @@ impl ProcessExecutor {
     /// el proceso warm lo procese y responda. `_env` no se usa aún: con un solo
     /// proceso por executor, la cola lo enruta implícitamente (en v0.1 real,
     /// las colas se indexan por función).
-    pub async fn invoke(&self, _env: &Environment, payload: &str) -> Result<String> {
+    pub async fn invoke(&self, _env: &Environment, payload: &[u8]) -> Result<InvokeOutcome> {
         let (respond_to, rx) = oneshot::channel();
         self.tx
             .send(Invocation {
-                payload: payload.to_string(),
+                payload: payload.to_vec(),
                 respond_to,
             })
             .await
             .map_err(|_| anyhow!("servidor Runtime API caído"))?;
 
-        let outcome = tokio::time::timeout(INVOKE_TIMEOUT, rx)
+        tokio::time::timeout(INVOKE_TIMEOUT, rx)
             .await
             .context("timeout esperando respuesta de la función")?
-            .map_err(|_| anyhow!("la invocación se descartó sin respuesta"))?;
-
-        outcome.map_err(|e| anyhow!("function error: {e}"))
+            .map_err(|_| anyhow!("la invocación se descartó sin respuesta"))
     }
 
     /// Mata el proceso (fin del environment). Reclamación explícita; en v0.1
     /// real esto lo gobierna el idle timeout / presión de memoria (§26).
     pub async fn destroy(&self, mut env: Environment) -> Result<()> {
-        env.child.kill().await.context("kill del bootstrap")?;
-        Ok(())
+        env.terminate().await
     }
 }
 
@@ -221,10 +260,10 @@ async fn next_invocation(State(st): State<RuntimeApiState>) -> impl IntoResponse
 async fn invocation_response(
     Path(id): Path<String>,
     State(st): State<RuntimeApiState>,
-    body: String,
+    body: Bytes,
 ) -> StatusCode {
     if let Some(tx) = st.pending.lock().await.remove(&id) {
-        let _ = tx.send(Ok(body));
+        let _ = tx.send(InvokeOutcome::Success(body.to_vec()));
     }
     StatusCode::ACCEPTED
 }
@@ -233,10 +272,10 @@ async fn invocation_response(
 async fn invocation_error(
     Path(id): Path<String>,
     State(st): State<RuntimeApiState>,
-    body: String,
+    body: Bytes,
 ) -> StatusCode {
     if let Some(tx) = st.pending.lock().await.remove(&id) {
-        let _ = tx.send(Err(body));
+        let _ = tx.send(InvokeOutcome::FunctionError(body.to_vec()));
     }
     StatusCode::ACCEPTED
 }

@@ -11,7 +11,10 @@ Kubernetes, sin daemon de contenedores, en un solo binario. Apache-2.0.
 
 ## Estado
 
-Fase RFC + andamiaje inicial. El diseño completo vive en
+v0.1 en construcción: pasos 0–8 completos (scaffold, persistencia, artifacts,
+CRUD, ejecución real de ZIP con reuso warm, API AWS-compatible, ARN local y
+SigV4 mínimo, `zapcloud serve`, configuración y health). El executor actual corre
+en modo process / T1 y **no ofrece aislamiento**. El diseño completo vive en
 [`docs/rfc/`](docs/rfc/):
 
 - [`zapcloud.md`](docs/rfc/zapcloud.md) — visión del ecosistema (functions,
@@ -40,3 +43,15 @@ una línea en el `Cargo.toml` del workspace, sin reorganizar lo existente.
 cargo build
 cargo run -p zapcloud
 ```
+
+Para levantar la API local:
+
+```bash
+cp zapcloud.toml.example zapcloud.toml
+zapcloud serve
+```
+
+También puede usarse otro archivo con `zapcloud serve --config <path>`.
+
+En v0.1 la configuración debe declarar `tenant_trust = "trusted"` y
+`executor.default = "process"`; el executor funciona en T1, sin aislamiento.

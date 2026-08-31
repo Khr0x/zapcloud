@@ -37,6 +37,22 @@ impl Database {
             .await?;
         Ok(row)
     }
+
+    /// Elimina metadata únicamente cuando ninguna función la referencia.
+    /// Devuelve `true` si se eliminó una fila.
+    pub async fn delete_artifact_if_unreferenced(&self, sha256: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "DELETE FROM artifacts \
+             WHERE sha256 = ? AND NOT EXISTS (\
+                 SELECT 1 FROM functions f \
+                 WHERE f.latest_artifact_id = artifacts.id\
+             )",
+        )
+        .bind(sha256)
+        .execute(self.pool())
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 /// Upsert de un artifact sobre una conexión (pool o transacción), devolviendo la

@@ -1442,8 +1442,8 @@ timeout    = 30s
 
 | Límite | Valor AWS | Se aplica en | Violación → error AWS |
 |---|---|---|---|
-| Payload síncrono (req+resp) | 6 MB | Invoke `RequestResponse` | `RequestEntityTooLargeException` (413) |
-| Payload asíncrono | 256 KB | Invoke `Event` | `RequestEntityTooLargeException` (413) |
+| Payload síncrono (req+resp) | 6 MB | Invoke `RequestResponse` | `RequestTooLargeException` (413) |
+| Payload asíncrono | 1 MB | Invoke `Event` | `RequestTooLargeException` (413) |
 | Package zip (subida directa) | 50 MB | Create/UpdateFunctionCode | `InvalidParameterValueException` |
 | Package descomprimido (code+layers) | 250 MB | Create/Update | `InvalidParameterValueException` |
 | Container image | 10 GB | Create (Image) | `InvalidParameterValueException` |
@@ -1459,7 +1459,7 @@ timeout    = 30s
 ## Detalles sutiles de comportamiento
 
 - **Timeout de ejecución NO es un error de API.** Al exceder el timeout, Invoke devuelve **200 OK** con `FunctionError: Unhandled` y `errorMessage` exacto `Task timed out after 30.05 seconds`. Devolver 500 o un error HTTP rompe la compatibilidad observable.
-- **Payload: mismo error, umbral distinto.** Sync (6 MB) y async (256 KB) devuelven ambos `RequestEntityTooLargeException`, pero con límites diferentes.
+- **Payload: mismo error, umbral distinto.** Sync (6 MB) y async (1 MB) devuelven ambos `RequestTooLargeException`, pero con límites diferentes.
 
 ## Fijos por defecto, configurables con advertencia
 
@@ -2130,6 +2130,7 @@ AWS_ACCESS_KEY_ID=local
 AWS_SECRET_ACCESS_KEY=local
 
 aws lambda list-functions \
+  --region local-1 \
   --endpoint-url http://localhost:9000
 ```
 
@@ -2142,6 +2143,15 @@ timestamp
 service=lambda
 region
 ```
+
+El alcance v0.1 es deliberadamente mínimo: una credencial estática por instancia,
+autenticación mediante el header `Authorization`, scope
+`YYYYMMDD/local-1/lambda/aws4_request`, `host` y `x-amz-date` firmados y una ventana
+de reloj de ±5 minutos. El modo `none` omite esta verificación para laboratorio.
+
+No se aceptan presigned URLs, SigV4a, `Date` como sustituto de `x-amz-date`,
+credenciales temporales (`x-amz-security-token`), rotación ni policies. Esas piezas
+pertenecen al hito de seguridad v0.9.
 
 ---
 
@@ -2488,7 +2498,7 @@ mode = "strict"
 
 [compat.overrides]   # solo se aplican si mode = "relaxed"
 max_sync_payload  = "6MB"     # subirlo rompe paridad con AWS
-max_async_payload = "256KB"
+max_async_payload = "1MB"
 max_tmp           = "10GB"
 max_timeout       = "900s"    # subirlo rompe paridad con AWS
 
@@ -2501,6 +2511,10 @@ otlp_endpoint = "http://localhost:4317"
 ```
 
 `tenant_trust` es la declaración consciente del nivel de amenaza (ver §31). El servidor valida en el arranque que el executor configurado satisface ese nivel; ante un `hostile` sin Firecracker disponible, falla de forma explícita en vez de degradar en silencio a un aislamiento insuficiente.
+
+En v0.1, `zapcloud serve` restringe este campo a `trusted` porque el executor
+disponible es process/T1 y no ofrece aislamiento. `semi-trusted` queda habilitado
+cuando entre el sandbox de v0.2.
 
 ---
 
@@ -2623,8 +2637,8 @@ límites (ver eje abajo)
 Eje de límites (no solo happy paths): enviar cada límite del §35 en su borde y comparar el error y el status contra AWS real.
 
 ```text
-- payload sync de 6 MB + 1 byte      → RequestEntityTooLargeException (413)
-- payload async de 256 KB + 1 byte   → RequestEntityTooLargeException (413)
+- payload sync de 6 MB + 1 byte      → RequestTooLargeException (413)
+- payload async de 1 MB + 1 byte     → RequestTooLargeException (413)
 - package zip de 50 MB + 1           → InvalidParameterValueException
 - env vars de 4 KB + 1               → InvalidParameterValueException
 - MemorySize = 127                   → InvalidParameterValueException
@@ -2642,8 +2656,9 @@ Tipos importantes:
 ```text
 ResourceNotFoundException
 ResourceConflictException
+PreconditionFailedException
 InvalidParameterValueException
-RequestEntityTooLargeException
+RequestTooLargeException
 TooManyRequestsException
 ServiceException
 ```

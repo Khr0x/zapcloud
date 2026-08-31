@@ -11,9 +11,10 @@
 //!   InvalidParameter → InvalidParameterValueException
 //!   NotFound         → ResourceNotFoundException
 //!   Conflict         → ResourceConflictException
+//!   PreconditionFailed → PreconditionFailedException
 //!   Unsupported      → InvalidParameterValueException
 //!
-//! El routing de Invoke (paso 5) usará `zc-invocation`; aquí aún no.
+//! El routing HTTP de Invoke vive en `zc-api-lambda` (paso 6).
 
 mod validate;
 
@@ -22,9 +23,16 @@ pub use validate::{Architecture, PackageType};
 use std::str::FromStr;
 
 use zc_artifact_store::ArtifactStore;
-use zc_persistence::{Database, NewArtifact, NewFunction, UpdateCodeResult};
+use zc_persistence::{Database, NewArtifact, NewFunction, UpdateCodeWithArtifactResult};
 
-pub use zc_persistence::Function;
+pub use zc_persistence::{Artifact, Function};
+
+/// Vista completa que necesita la API AWS para construir FunctionConfiguration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionDetails {
+    pub function: Function,
+    pub artifact: Artifact,
+}
 
 const ZIP_MEDIA_TYPE: &str = "application/zip";
 
@@ -40,8 +48,12 @@ pub enum ManagerError {
     NotFound(String),
     #[error("la función ya existe: {0}")]
     Conflict(String),
+    #[error("la revisión esperada no coincide (esperada {expected}, actual {actual})")]
+    PreconditionFailed { expected: String, actual: String },
     #[error("no soportado en v0.1: {0}")]
     Unsupported(String),
+    #[error("artifact inválido: {0}")]
+    InvalidArtifact(String),
     #[error(transparent)]
     Persistence(#[from] zc_persistence::PersistenceError),
     #[error(transparent)]
@@ -78,7 +90,7 @@ impl FunctionManager {
     }
 
     /// Flujo CreateFunction (§13): validar → hash/store → persistir → devolver.
-    pub async fn create_function(&self, req: CreateFunctionRequest) -> Result<Function> {
+    pub async fn create_function(&self, req: CreateFunctionRequest) -> Result<FunctionDetails> {
         // 1. Validación (§35). Falla antes de tocar disco o DB.
         validate::validate_name(&req.name)?;
         validate::validate_runtime(&req.runtime)?;
@@ -87,6 +99,7 @@ impl FunctionManager {
         validate::validate_memory(req.memory_size)?;
         validate::validate_timeout(req.timeout)?;
         validate::validate_zip_size(req.code.len())?;
+        validate::validate_deployment_zip(&req.code)?;
 
         match PackageType::from_str(&req.package_type)? {
             PackageType::Zip => {}
@@ -103,19 +116,14 @@ impl FunctionManager {
         }
 
         // 3. Guardar el blob por SHA256 (dedup en el store, §15).
-        // ponytail: si la tx de abajo hace rollback, este blob queda en disco.
-        // Es inocuo (content-addressed, se reusa por dedup); el GC de blobs
-        // huérfanos es trabajo futuro (aún no hay path de borrado de artifacts).
         let stored = self.store.put(&req.code).await?;
 
-        // 4. Persistir artifact + función en una única transacción (§13): si el
-        // insert de la función falla (carrera de nombre), rollback ⇒ sin
-        // artifact huérfano en la DB. El `latest_artifact_id` lo fija la tx.
-        let function = self
+        // 4. Persistir artifact + función en una única transacción (§13).
+        let function = match self
             .db
             .create_function_with_artifact(
                 NewArtifact {
-                    sha256: stored.sha256,
+                    sha256: stored.sha256.clone(),
                     size: stored.size,
                     media_type: ZIP_MEDIA_TYPE.to_string(),
                     storage_path: stored.path.to_string_lossy().into_owned(),
@@ -132,22 +140,59 @@ impl FunctionManager {
                     latest_artifact_id: None, // lo fija create_function_with_artifact
                 },
             )
-            .await?;
+            .await
+        {
+            Ok(function) => function,
+            Err(zc_persistence::PersistenceError::FunctionNameConflict(name)) => {
+                self.cleanup_blob_if_unreferenced(&stored).await;
+                return Err(ManagerError::Conflict(name));
+            }
+            Err(error) => return Err(error.into()),
+        };
 
-        Ok(function)
+        self.details(function).await
     }
 
     /// GetFunction (§7). `NotFound` si no existe.
-    pub async fn get_function(&self, name: &str) -> Result<Function> {
-        self.db
+    pub async fn get_function(&self, name: &str) -> Result<FunctionDetails> {
+        let function = self
+            .db
             .get_function_by_name(name)
             .await?
-            .ok_or_else(|| ManagerError::NotFound(name.to_string()))
+            .ok_or_else(|| ManagerError::NotFound(name.to_string()))?;
+        self.details(function).await
     }
 
     /// ListFunctions (§7). Orden estable por nombre (lo da la persistencia).
-    pub async fn list_functions(&self) -> Result<Vec<Function>> {
-        Ok(self.db.list_functions().await?)
+    pub async fn list_functions(&self) -> Result<Vec<FunctionDetails>> {
+        self.list_functions_page(None, i64::MAX as usize).await
+    }
+
+    /// Lista una página y resuelve los artifacts mediante un único JOIN en DB.
+    pub async fn list_functions_page(
+        &self,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<FunctionDetails>> {
+        let limit = i64::try_from(limit).map_err(|_| ManagerError::InvalidParameter {
+            field: "limit",
+            message: "límite de listado fuera de rango".to_string(),
+        })?;
+        let rows = self.db.list_function_artifacts_page(after, limit).await?;
+        rows.into_iter()
+            .map(|row| {
+                let artifact = row.artifact.ok_or_else(|| {
+                    ManagerError::InvalidArtifact(format!(
+                        "la función '{}' no tiene código",
+                        row.function.name
+                    ))
+                })?;
+                Ok(FunctionDetails {
+                    function: row.function,
+                    artifact,
+                })
+            })
+            .collect()
     }
 
     /// DeleteFunction (§7). `NotFound` si no existía.
@@ -163,14 +208,15 @@ impl FunctionManager {
     ///
     /// `expected_revision` habilita concurrencia optimista estilo AWS
     /// `RevisionId`: si se pasa y no coincide con la revisión actual, devuelve
-    /// `Conflict` (§71 ResourceConflictException); `None` = incondicional.
+    /// `PreconditionFailed` (§71); `None` = incondicional.
     pub async fn update_function_code(
         &self,
         name: &str,
         code: &[u8],
         expected_revision: Option<&str>,
-    ) -> Result<Function> {
+    ) -> Result<FunctionDetails> {
         validate::validate_zip_size(code.len())?;
+        validate::validate_deployment_zip(code)?;
 
         // Existencia primero → NotFound limpio antes de escribir blob.
         if self.db.get_function_by_name(name).await?.is_none() {
@@ -178,27 +224,72 @@ impl FunctionManager {
         }
 
         let stored = self.store.put(code).await?;
-        let artifact = self
+        let result = self
             .db
-            .put_artifact(NewArtifact {
-                sha256: stored.sha256,
-                size: stored.size,
-                media_type: ZIP_MEDIA_TYPE.to_string(),
-                storage_path: stored.path.to_string_lossy().into_owned(),
-            })
+            .update_function_code_with_artifact(
+                NewArtifact {
+                    sha256: stored.sha256.clone(),
+                    size: stored.size,
+                    media_type: ZIP_MEDIA_TYPE.to_string(),
+                    storage_path: stored.path.to_string_lossy().into_owned(),
+                },
+                name,
+                expected_revision,
+            )
             .await?;
 
+        match result {
+            UpdateCodeWithArtifactResult::Updated { function, artifact } => {
+                Ok(FunctionDetails { function, artifact })
+            }
+            UpdateCodeWithArtifactResult::NotFound => {
+                self.cleanup_blob_if_unreferenced(&stored).await;
+                Err(ManagerError::NotFound(name.to_string()))
+            }
+            UpdateCodeWithArtifactResult::RevisionMismatch(actual) => {
+                self.cleanup_blob_if_unreferenced(&stored).await;
+                Err(ManagerError::PreconditionFailed {
+                    expected: expected_revision.unwrap_or("<none>").to_string(),
+                    actual,
+                })
+            }
+        }
+    }
+
+    async fn cleanup_blob_if_unreferenced(&self, stored: &zc_artifact_store::StoredArtifact) {
         match self
             .db
-            .update_function_code(name, &artifact.id, expected_revision)
-            .await?
+            .delete_artifact_if_unreferenced(&stored.sha256)
+            .await
         {
-            UpdateCodeResult::Updated(function) => Ok(function),
-            UpdateCodeResult::NotFound => Err(ManagerError::NotFound(name.to_string())),
-            UpdateCodeResult::RevisionMismatch(current) => Err(ManagerError::Conflict(format!(
-                "revision_id no coincide (esperado {}, actual {current})",
-                expected_revision.unwrap_or("<none>")
-            ))),
+            Ok(true) => {
+                let _ = self.store.remove(&stored.sha256).await;
+            }
+            Ok(false) => {
+                // La transacción de update puede haber revertido el insert,
+                // por lo que no queda metadata que eliminar.
+                if matches!(
+                    self.db.get_artifact_by_sha256(&stored.sha256).await,
+                    Ok(None)
+                ) {
+                    let _ = self.store.remove(&stored.sha256).await;
+                }
+            }
+            Err(_) => {}
         }
+    }
+
+    async fn details(&self, function: Function) -> Result<FunctionDetails> {
+        let artifact_id = function.latest_artifact_id.as_deref().ok_or_else(|| {
+            ManagerError::InvalidArtifact(format!("la función '{}' no tiene código", function.name))
+        })?;
+        let artifact = self
+            .db
+            .get_artifact_by_id(artifact_id)
+            .await?
+            .ok_or_else(|| {
+                ManagerError::InvalidArtifact(format!("artifact {artifact_id} ausente"))
+            })?;
+        Ok(FunctionDetails { function, artifact })
     }
 }
