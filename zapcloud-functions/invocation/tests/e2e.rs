@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use zc_artifact_store::ArtifactStore;
-use zc_invocation::{InvocationError, Invoker};
+use zc_invocation::{InvocationError, InvokeOutcome, Invoker};
 use zc_persistence::{Database, NewArtifact, NewFunction};
 
 /// Directorio temporal único para este proceso de test.
@@ -38,9 +38,15 @@ fn build_zip() -> Vec<u8> {
 
 /// Monta un `Invoker` con una función `provided.al2023` cuyo código es el ZIP dado.
 async fn setup(runtime: &str, code: Vec<u8>) -> Invoker {
+    setup_with_names(runtime, code, &["echo"]).await
+}
+
+async fn setup_with_names(runtime: &str, code: Vec<u8>, names: &[&str]) -> Invoker {
     let db = Database::connect_in_memory().await.expect("db");
     db.migrate().await.expect("migrate");
-    let store = ArtifactStore::open(unique_tmp("store")).await.expect("store");
+    let store = ArtifactStore::open(unique_tmp("store"))
+        .await
+        .expect("store");
 
     let stored = store.put(&code).await.expect("put artifact");
     let artifact = db
@@ -52,21 +58,23 @@ async fn setup(runtime: &str, code: Vec<u8>) -> Invoker {
         })
         .await
         .expect("put_artifact");
-    db.create_function(NewFunction {
-        name: "echo".to_string(),
-        description: None,
-        runtime: runtime.to_string(),
-        handler: "echo.handler".to_string(),
-        architecture: "arm64".to_string(),
-        memory_size: 128,
-        timeout: 3,
-        package_type: "Zip".to_string(),
-        latest_artifact_id: Some(artifact.id),
-    })
-    .await
-    .expect("create_function");
+    for name in names {
+        db.create_function(NewFunction {
+            name: (*name).to_string(),
+            description: None,
+            runtime: runtime.to_string(),
+            handler: format!("{name}.handler"),
+            architecture: "arm64".to_string(),
+            memory_size: 128,
+            timeout: 3,
+            package_type: "Zip".to_string(),
+            latest_artifact_id: Some(artifact.id.clone()),
+        })
+        .await
+        .expect("create_function");
+    }
 
-    Invoker::new(db, store, unique_tmp("work"))
+    Invoker::new(db, store, unique_tmp("work"), "us-test-1")
 }
 
 #[tokio::test]
@@ -75,40 +83,112 @@ async fn desempaqueta_ejecuta_y_reusa_warm() {
 
     // --- Invocación 1: ZIP real desempaquetado → proceso arranca → responde ---
     let r1 = invoker
-        .invoke("echo", r#"{"hello":"zap"}"#)
+        .invoke("echo", br#"{"hello":"zap"}"#)
         .await
         .expect("invoke #1");
-    let v1: Value = serde_json::from_str(&r1).expect("respuesta #1 es JSON");
+    let InvokeOutcome::Success(r1) = r1 else {
+        panic!("invoke #1 debía ser exitoso")
+    };
+    let v1: Value = serde_json::from_slice(&r1).expect("respuesta #1 es JSON");
     assert_eq!(v1["echo"]["hello"], "zap", "el handler recibió el evento");
-    assert_eq!(v1["handler"], "echo.handler", "el env contract llegó (_HANDLER)");
+    assert_eq!(
+        v1["handler"], "echo.handler",
+        "el env contract llegó (_HANDLER)"
+    );
+    assert_eq!(
+        v1["region"], "us-test-1",
+        "la región configurada llega al proceso (AWS_REGION)"
+    );
     assert_eq!(v1["count"], 1, "primera invocación del proceso");
     let pid1 = v1["pid"].clone();
 
     // --- Invocación 2: mismo environment (warm reuse), sin nuevo proceso ---
-    let r2 = invoker.invoke("echo", r#"{"n":2}"#).await.expect("invoke #2");
-    let v2: Value = serde_json::from_str(&r2).expect("respuesta #2 es JSON");
-    assert_eq!(v2["echo"]["n"], 2, "el proceso warm procesó la 2ª invocación");
+    let r2 = invoker
+        .invoke("echo", br#"{"n":2}"#)
+        .await
+        .expect("invoke #2");
+    let InvokeOutcome::Success(r2) = r2 else {
+        panic!("invoke #2 debía ser exitoso")
+    };
+    let v2: Value = serde_json::from_slice(&r2).expect("respuesta #2 es JSON");
+    assert_eq!(
+        v2["echo"]["n"], 2,
+        "el proceso warm procesó la 2ª invocación"
+    );
     assert_eq!(v2["pid"], pid1, "warm reuse: es el mismo proceso");
-    assert_eq!(v2["count"], 2, "el contador del proceso avanzó → no re-spawn");
+    assert_eq!(
+        v2["count"], 2,
+        "el contador del proceso avanzó → no re-spawn"
+    );
+}
+
+#[tokio::test]
+async fn invalidar_function_destruye_warm_y_fuerza_cold_start() {
+    let invoker = setup(PROVIDED, build_zip()).await;
+
+    let first = invoker.invoke("echo", br#"{}"#).await.expect("invoke #1");
+    let InvokeOutcome::Success(first) = first else {
+        panic!("invoke #1 debía ser exitoso")
+    };
+    let first: Value = serde_json::from_slice(&first).expect("respuesta #1 es JSON");
+
+    invoker
+        .invalidate_function("echo")
+        .await
+        .expect("invalidate_function");
+
+    let second = invoker.invoke("echo", br#"{}"#).await.expect("invoke #2");
+    let InvokeOutcome::Success(second) = second else {
+        panic!("invoke #2 debía ser exitoso")
+    };
+    let second: Value = serde_json::from_slice(&second).expect("respuesta #2 es JSON");
+    assert_eq!(second["count"], 1, "invalidación fuerza un nuevo proceso");
+    assert_ne!(
+        second["pid"], first["pid"],
+        "el proceso anterior fue destruido"
+    );
+}
+
+#[tokio::test]
+async fn funciones_distintas_no_se_bloquean_entre_si() {
+    let invoker = setup_with_names(PROVIDED, build_zip(), &["echo", "other"]).await;
+
+    // Calentar ambos environments para medir solo la ejecución concurrente.
+    invoker.invoke("echo", b"{}").await.expect("warm echo");
+    invoker.invoke("other", b"{}").await.expect("warm other");
+
+    let started = std::time::Instant::now();
+    let (first, second) = tokio::join!(
+        invoker.invoke("echo", br#"{"sleep_ms":300}"#),
+        invoker.invoke("other", br#"{"sleep_ms":300}"#),
+    );
+    assert!(matches!(first, Ok(InvokeOutcome::Success(_))));
+    assert!(matches!(second, Ok(InvokeOutcome::Success(_))));
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(550),
+        "las funciones distintas no deben compartir el lock de invocación"
+    );
 }
 
 #[tokio::test]
 async fn el_error_del_handler_se_propaga() {
     let invoker = setup(PROVIDED, build_zip()).await;
 
-    let result = invoker.invoke("echo", r#"{"fail":true}"#).await;
-    let err = result.expect_err("un fallo del handler debe propagarse como Err");
-    assert!(
-        matches!(err, InvocationError::Execution(_)),
-        "el fallo del handler es un error de ejecución: {err}"
-    );
+    let result = invoker
+        .invoke("echo", br#"{"fail":true}"#)
+        .await
+        .expect("invoke");
+    assert!(matches!(result, InvokeOutcome::FunctionError(_)));
 }
 
 #[tokio::test]
 async fn funcion_inexistente_es_notfound() {
     let invoker = setup(PROVIDED, build_zip()).await;
 
-    let err = invoker.invoke("no-existe", "{}").await.expect_err("NotFound");
+    let err = invoker
+        .invoke("no-existe", b"{}")
+        .await
+        .expect_err("NotFound");
     assert!(matches!(err, InvocationError::NotFound(_)), "{err}");
 }
 
@@ -118,7 +198,7 @@ async fn runtime_no_provided_es_unsupported() {
     let invoker = setup("nodejs22.x", build_zip()).await;
 
     let err = invoker
-        .invoke("echo", "{}")
+        .invoke("echo", b"{}")
         .await
         .expect_err("Unsupported para runtime sin bundle");
     assert!(matches!(err, InvocationError::Unsupported(_)), "{err}");

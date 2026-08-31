@@ -6,3 +6,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde.workspace = true
+hmac.workspace = true
+http.workspace = true
+percent-encoding.workspace = true
+sha2.workspace = true
+hex.workspace = true
+time.workspace = true

@@ -9,6 +9,7 @@ repository.workspace = true
 zc-persistence.workspace = true
 zc-artifact-store.workspace = true
 thiserror.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

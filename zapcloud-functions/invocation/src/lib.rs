@@ -22,7 +22,8 @@
 //!   NotFound        → ResourceNotFoundException
 //!   Unsupported     → InvalidParameterValueException
 //!   InvalidArtifact → InvalidParameterValueException
-//!   Execution       → 200 con `FunctionError` (framing de invoke, §43/§71)
+//!   FunctionError outcome → 200 con `FunctionError` (framing de invoke, §43/§71)
+//!   Execution       → ServiceException (fallo interno del executor)
 
 mod unpack;
 
@@ -30,18 +31,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use zc_artifact_store::ArtifactStore;
 use zc_executor_sandbox::{Environment, FunctionSpec, ProcessExecutor};
 use zc_persistence::{Database, Function};
 
+pub use zc_executor_sandbox::InvokeOutcome;
+
 /// Único runtime que ejecuta en v0.1 (§16 paso 1). Node/Python: v0.1.1.
 const PROVIDED_RUNTIME: &str = "provided.al2023";
 /// Único package type que ejecuta en v0.1 (§7). Image: v0.5.
 const ZIP_PACKAGE_TYPE: &str = "Zip";
-/// Región local, coherente con el ARN `local-1` (§56).
-const LOCAL_REGION: &str = "local-1";
 /// `LAMBDA_RUNTIME_DIR` (§16). Placeholder en process mode sin chroot.
 const RUNTIME_DIR: &str = "/var/runtime";
 
@@ -72,8 +73,12 @@ struct WarmEnv {
     executor: ProcessExecutor,
     env: Environment,
     /// task_root desempaquetado; se mantiene vivo mientras exista el environment.
-    _task_root: PathBuf,
+    task_root: PathBuf,
+    retired: bool,
 }
+
+type WarmHandle = Arc<Mutex<WarmEnv>>;
+type WarmEnvs = HashMap<String, WarmHandle>;
 
 /// Orquestador del camino de invocación (execution plane, §9).
 ///
@@ -86,16 +91,26 @@ pub struct Invoker {
     store: ArtifactStore,
     /// Base donde se desempaquetan los task_roots de cada environment.
     work_root: PathBuf,
-    envs: Arc<Mutex<HashMap<String, WarmEnv>>>,
+    /// Región del endpoint, propagada al contrato de entorno del runtime.
+    region: String,
+    /// El lock del mapa solo protege el registro; cada environment tiene su
+    /// propio lock para conservar la semántica de una invocación por proceso.
+    envs: Arc<RwLock<WarmEnvs>>,
 }
 
 impl Invoker {
-    pub fn new(db: Database, store: ArtifactStore, work_root: PathBuf) -> Self {
+    pub fn new(
+        db: Database,
+        store: ArtifactStore,
+        work_root: PathBuf,
+        region: impl Into<String>,
+    ) -> Self {
         Self {
             db,
             store,
             work_root,
-            envs: Arc::new(Mutex::new(HashMap::new())),
+            region: region.into(),
+            envs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -103,10 +118,9 @@ impl Invoker {
     /// un environment warm (cold start si hace falta, §21) y devuelve la
     /// respuesta del handler.
     ///
-    /// NOTA v0.1: el registro se serializa bajo un `Mutex` durante toda la
-    /// invocación — suficiente para el walking skeleton single-node. La
-    /// concurrencia real (pool + scheduler) es v0.2 (§23, §28) y v0.3 (§29).
-    pub async fn invoke(&self, function_name: &str, payload: &str) -> Result<String> {
+    /// El acceso al registro es breve y la serialización ocurre solo dentro del
+    /// environment seleccionado. Funciones distintas pueden progresar en paralelo.
+    pub async fn invoke(&self, function_name: &str, payload: &[u8]) -> Result<InvokeOutcome> {
         // 1. Resolver metadata.
         let function = self
             .db
@@ -130,18 +144,72 @@ impl Invoker {
 
         // 3. Asegurar environment warm; cold start si no existe (§21/§22).
         let key = format!("{}:{}", function.name, function.revision_id);
-        let mut envs = self.envs.lock().await;
-        if !envs.contains_key(&key) {
-            let warm = self.cold_start(&function).await?;
-            envs.insert(key.clone(), warm);
-        }
-        let warm = envs.get(&key).expect("insertado justo arriba o preexistente");
+        let warm = self.envs.read().await.get(&key).cloned();
+        let warm = match warm {
+            Some(warm) => warm,
+            None => {
+                // El write lock evita dos cold starts para la misma revisión.
+                // Solo se mantiene durante el arranque, nunca durante Invoke.
+                let mut envs = self.envs.write().await;
+                if let Some(warm) = envs.get(&key).cloned() {
+                    warm
+                } else {
+                    let warm = Arc::new(Mutex::new(self.cold_start(&function).await?));
+                    envs.insert(key, warm.clone());
+                    warm
+                }
+            }
+        };
 
         // 4. Invocar sobre el proceso warm y devolver la respuesta.
+        let warm = warm.lock().await;
+        if warm.retired {
+            return Err(InvocationError::Execution(anyhow::anyhow!(
+                "environment retirado"
+            )));
+        }
         warm.executor
             .invoke(&warm.env, payload)
             .await
             .map_err(InvocationError::Execution)
+    }
+
+    /// Retira todos los environments de una función después de un update o
+    /// delete. Se quitan del registro antes de esperar al proceso para que el
+    /// mutex no bloquee operaciones no relacionadas.
+    pub async fn invalidate_function(&self, function_name: &str) -> Result<()> {
+        let prefix = format!("{function_name}:");
+        let retired = {
+            let mut envs = self.envs.write().await;
+            let keys = envs
+                .keys()
+                .filter(|key| key.starts_with(&prefix))
+                .cloned()
+                .collect::<Vec<_>>();
+            keys.into_iter()
+                .filter_map(|key| envs.remove(&key))
+                .collect::<Vec<_>>()
+        };
+
+        for warm in retired {
+            let (termination, task_root) = {
+                let mut warm = warm.lock().await;
+                warm.retired = true;
+                let termination = warm.env.terminate().await;
+                (termination, warm.task_root.clone())
+            };
+            termination.map_err(InvocationError::Execution)?;
+            match tokio::fs::remove_dir_all(&task_root).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(InvocationError::Execution(anyhow::anyhow!(
+                        "limpiando task_root {task_root:?}: {error}"
+                    )))
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Cold start (§21): resuelve el artifact, verifica integridad, desempaqueta
@@ -169,10 +237,13 @@ impl Invoker {
         // Desempaquetar en un task_root propio (dir = revision_id: único y seguro).
         let task_root = self.work_root.join(&function.revision_id);
         let dest = task_root.clone();
-        let bootstrap_path = tokio::task::spawn_blocking(move || unpack::prepare_task_root(bytes, dest))
-            .await
-            .map_err(|e| InvocationError::Execution(anyhow::anyhow!("join del desempaquetado: {e}")))?
-            .map_err(|e| InvocationError::InvalidArtifact(e.to_string()))?;
+        let bootstrap_path =
+            tokio::task::spawn_blocking(move || unpack::prepare_task_root(bytes, dest))
+                .await
+                .map_err(|e| {
+                    InvocationError::Execution(anyhow::anyhow!("join del desempaquetado: {e}"))
+                })?
+                .map_err(|e| InvocationError::InvalidArtifact(e.to_string()))?;
 
         // Arrancar el proceso con el contrato de entorno §16 (§21).
         let executor = ProcessExecutor::start()
@@ -185,7 +256,7 @@ impl Invoker {
             task_root: task_root.clone(),
             runtime_dir: PathBuf::from(RUNTIME_DIR),
             memory_size: function.memory_size,
-            region: LOCAL_REGION.to_string(),
+            region: self.region.clone(),
             log_group: format!("/aws/lambda/{}", function.name),
             log_stream: function.revision_id.clone(),
         };
@@ -197,7 +268,8 @@ impl Invoker {
         Ok(WarmEnv {
             executor,
             env,
-            _task_root: task_root,
+            task_root,
+            retired: false,
         })
     }
 }

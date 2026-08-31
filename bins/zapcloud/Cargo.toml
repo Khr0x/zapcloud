@@ -18,6 +18,18 @@ zc-telemetry.workspace = true
 zc-api-lambda.workspace = true
 zc-function-manager.workspace = true
 zc-executor-sandbox.workspace = true
+zc-persistence.workspace = true
+zc-artifact-store.workspace = true
+zc-invocation.workspace = true
+zc-aws-protocol.workspace = true
 # Para el subcomando `spike` (demo manual del loop Runtime API, §18).
 tokio.workspace = true
 anyhow.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+toml.workspace = true

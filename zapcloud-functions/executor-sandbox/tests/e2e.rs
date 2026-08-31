@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use zc_executor_sandbox::{FunctionSpec, ProcessExecutor};
+use zc_executor_sandbox::{FunctionSpec, InvokeOutcome, ProcessExecutor};
 
 fn spec() -> FunctionSpec {
     FunctionSpec {
@@ -32,17 +32,35 @@ async fn arranca_resuelve_responde_y_reusa_warm() {
 
     // --- Invocación 1: arranca → resuelve handler → responde ---
     let resp1 = exec
-        .invoke(&env, r#"{"hello":"zapcloud"}"#)
+        .invoke(&env, br#"{"hello":"zapcloud"}"#)
         .await
         .expect("invoke #1");
-    let v1: serde_json::Value = serde_json::from_str(&resp1).expect("respuesta #1 es JSON");
-    assert_eq!(v1["handled"]["hello"], "zapcloud", "el handler recibió el evento");
-    assert_eq!(v1["handler"], "spike.handler", "el env contract llegó (_HANDLER)");
+    let InvokeOutcome::Success(resp1) = resp1 else {
+        panic!("la primera invocación debía ser exitosa")
+    };
+    let v1: serde_json::Value = serde_json::from_slice(&resp1).expect("respuesta #1 es JSON");
+    assert_eq!(
+        v1["handled"]["hello"], "zapcloud",
+        "el handler recibió el evento"
+    );
+    assert_eq!(
+        v1["handler"], "spike.handler",
+        "el env contract llegó (_HANDLER)"
+    );
 
     // --- Invocación 2: mismo environment (warm reuse), sin nuevo proceso ---
-    let resp2 = exec.invoke(&env, r#"{"n":2}"#).await.expect("invoke #2 (warm)");
-    let v2: serde_json::Value = serde_json::from_str(&resp2).expect("respuesta #2 es JSON");
-    assert_eq!(v2["handled"]["n"], 2, "el proceso warm procesó la 2ª invocación");
+    let resp2 = exec
+        .invoke(&env, br#"{"n":2}"#)
+        .await
+        .expect("invoke #2 (warm)");
+    let InvokeOutcome::Success(resp2) = resp2 else {
+        panic!("la segunda invocación debía ser exitosa")
+    };
+    let v2: serde_json::Value = serde_json::from_slice(&resp2).expect("respuesta #2 es JSON");
+    assert_eq!(
+        v2["handled"]["n"], 2,
+        "el proceso warm procesó la 2ª invocación"
+    );
 
     exec.destroy(env).await.expect("destroy del environment");
 }
@@ -53,13 +71,11 @@ async fn el_camino_de_error_se_propaga() {
     let env = exec.create(&spec()).await.expect("create del environment");
 
     // `{"fail": true}` hace que el handler mande POST .../error (§18).
-    let result = exec.invoke(&env, r#"{"fail":true}"#).await;
-    assert!(result.is_err(), "un fallo del handler debe propagarse como Err");
-    let msg = result.unwrap_err().to_string();
-    assert!(
-        msg.contains("function error"),
-        "el error de función se marca como tal: {msg}"
-    );
+    let result = exec
+        .invoke(&env, br#"{"fail":true}"#)
+        .await
+        .expect("invoke");
+    assert!(matches!(result, InvokeOutcome::FunctionError(_)));
 
     exec.destroy(env).await.expect("destroy del environment");
 }

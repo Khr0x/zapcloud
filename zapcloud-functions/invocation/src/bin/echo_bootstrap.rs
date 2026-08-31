@@ -20,6 +20,7 @@ fn main() {
     let api = env::var("AWS_LAMBDA_RUNTIME_API")
         .expect("AWS_LAMBDA_RUNTIME_API no está definido (lo inyecta el executor)");
     let handler = env::var("_HANDLER").unwrap_or_default();
+    let region = env::var("AWS_REGION").unwrap_or_default();
     let base = format!("http://{api}{}", "/2018-06-01/runtime");
     let pid = std::process::id();
     let mut count: u64 = 0;
@@ -50,7 +51,7 @@ fn main() {
         let event = resp.text().unwrap_or_default();
         count += 1;
 
-        match handle(&event, &handler, pid, count) {
+        match handle(&event, &handler, &region, pid, count) {
             Ok(body) => {
                 let _ = client
                     .post(format!("{base}/invocation/{request_id}/response"))
@@ -73,16 +74,26 @@ fn main() {
 }
 
 /// Handler: eco determinista del evento, con marca de proceso para verificar warm.
-fn handle(event: &str, handler: &str, pid: u32, count: u64) -> Result<String, String> {
+fn handle(
+    event: &str,
+    handler: &str,
+    region: &str,
+    pid: u32,
+    count: u64,
+) -> Result<String, String> {
     let parsed: serde_json::Value = serde_json::from_str(event).map_err(|e| e.to_string())?;
 
     if parsed.get("fail").and_then(|v| v.as_bool()) == Some(true) {
         return Err("fallo solicitado por el evento".to_string());
     }
+    if let Some(delay) = parsed.get("sleep_ms").and_then(|value| value.as_u64()) {
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+    }
 
     let out = serde_json::json!({
         "echo": parsed,
         "handler": handler,
+        "region": region,
         "pid": pid,
         "count": count,
     });

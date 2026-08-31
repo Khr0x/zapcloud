@@ -57,6 +57,15 @@ pub struct Function {
     pub updated_at: i64,
 }
 
+/// Resultado de listar una función junto con su artifact más reciente.
+/// `artifact` es opcional para que la capa superior pueda reportar metadata
+/// corrupta en vez de ocultar silenciosamente la fila.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionWithArtifact {
+    pub function: Function,
+    pub artifact: Option<Artifact>,
+}
+
 /// Datos para crear una función. `id`, `revision_id` y timestamps los asigna
 /// la capa de persistencia.
 #[derive(Debug, Clone)]
