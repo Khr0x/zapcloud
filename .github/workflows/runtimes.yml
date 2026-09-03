@@ -1,7 +1,8 @@
 # Build reproducible + distribución de runtime bundles como OCI artifacts (§17).
 #
 # - Ensambla los bundles Linux (carril de referencia, RIC real) en contenedor
-#   del target vía Docker+QEMU.
+#   del target vía Docker. Solo x86_64: arm64 está fuera de scope hasta que haya
+#   un host Linux ARM objetivo (evita el compile del RIC nativo bajo QEMU).
 # - Gate de reproducibilidad: si `runtimes/index.json` ya pinnea un tree_sha256
 #   para ese runtime×plataforma, el build DEBE reproducirlo (falla si difiere).
 # - En `main`: publica cada bundle en ghcr.io y agrega el índice actualizado.
@@ -33,13 +34,9 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [nodejs22.x, python3.13]
-        arch: [amd64, arm64]
+        arch: [amd64]
     steps:
       - uses: actions/checkout@v4
-
-      # QEMU: permite ensamblar el bundle arm64 dentro de su contenedor target
-      # en un runner amd64 (el RIC se compila nativo dentro del contenedor, §17).
-      - uses: docker/setup-qemu-action@v3
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
