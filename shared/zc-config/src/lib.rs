@@ -35,6 +35,8 @@ pub struct Config {
     pub auth: AuthConfig,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    #[serde(default)]
+    pub runtimes: RuntimesConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,6 +124,36 @@ impl Default for TelemetryConfig {
     }
 }
 
+/// Distribución de runtime bundles (§17). La ruta de cache es `storage.runtimes`;
+/// esta sección gobierna de dónde bajarlos y qué asegurar al arrancar.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimesConfig {
+    /// Base del registry OCI (`ghcr.io/<org>/zapcloud`).
+    #[serde(default = "default_registry")]
+    pub registry: String,
+    /// Runtimes a asegurar en el preflight (`["nodejs22.x", …]`).
+    #[serde(default)]
+    pub preinstall: Vec<String>,
+    /// Si `true`, `serve` baja los `preinstall` ausentes antes de escuchar.
+    #[serde(default)]
+    pub ensure_on_start: bool,
+    /// Si `true`, nunca toca la red: solo usa la cache local.
+    #[serde(default)]
+    pub offline: bool,
+}
+
+impl Default for RuntimesConfig {
+    fn default() -> Self {
+        Self {
+            registry: default_registry(),
+            preinstall: Vec::new(),
+            ensure_on_start: false,
+            offline: false,
+        }
+    }
+}
+
 impl Config {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -199,6 +231,10 @@ fn default_executor() -> String {
 
 fn default_runtimes() -> PathBuf {
     PathBuf::from("./runtimes")
+}
+
+fn default_registry() -> String {
+    "ghcr.io/khrox20/zapcloud".into()
 }
 
 fn default_true() -> bool {

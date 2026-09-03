@@ -36,17 +36,20 @@ async fn main() -> Result<()> {
     match task.as_str() {
         "spike" => run_spike().await?,
         "serve" => run_serve(config_path(args)?).await?,
+        "runtimes" => run_runtimes(args.collect()).await?,
         "" => {
             print_help();
         }
-        other => anyhow::bail!("comando '{other}' desconocido (usa: serve o spike)"),
+        other => anyhow::bail!("comando '{other}' desconocido (usa: serve, runtimes o spike)"),
     }
     Ok(())
 }
 
 fn print_help() {
     println!("zapcloud v{}", env!("CARGO_PKG_VERSION"));
-    println!("uso: zapcloud serve [--config <path>] | zapcloud spike");
+    println!("uso: zapcloud serve [--config <path>]");
+    println!("     zapcloud runtimes install [--runtime <r>] [--config <path>]");
+    println!("     zapcloud spike");
 }
 
 fn config_path(mut args: impl Iterator<Item = String>) -> Result<PathBuf> {
@@ -57,10 +60,97 @@ fn config_path(mut args: impl Iterator<Item = String>) -> Result<PathBuf> {
     }
 }
 
+/// `zapcloud runtimes install [--runtime <r>] [--config <path>]` (§17): baja y
+/// verifica los bundles ausentes desde el registry OCI. Sin `--runtime`, instala
+/// los de `[runtimes].preinstall`. El CLI completo (`runtimes list`, `doctor`)
+/// llega en el paso 22.
+async fn run_runtimes(args: Vec<String>) -> Result<()> {
+    let mut it = args.into_iter();
+    match it.next().as_deref() {
+        Some("install") => {}
+        _ => anyhow::bail!("uso: zapcloud runtimes install [--runtime <r>] [--config <path>]"),
+    }
+    let mut runtime = None;
+    let mut config_file = PathBuf::from("zapcloud.toml");
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--runtime" => runtime = Some(it.next().context("--runtime requiere un valor")?),
+            "--config" => {
+                config_file = PathBuf::from(it.next().context("--config requiere un valor")?)
+            }
+            other => anyhow::bail!("flag desconocido: {other}"),
+        }
+    }
+
+    let config = Config::load(&config_file)
+        .with_context(|| format!("cargando configuración desde {}", config_file.display()))?;
+    zc_telemetry::init();
+    let runtimes_root = absolute_path(&config.storage.runtimes)?;
+    let index = load_index(&runtimes_root)?;
+    let auth = zc_runtime::registry_auth_from_env();
+
+    let targets: Vec<String> = match runtime {
+        Some(r) => vec![r],
+        None => config.runtimes.preinstall.clone(),
+    };
+    if targets.is_empty() {
+        anyhow::bail!("nada que instalar: pasa --runtime o define [runtimes].preinstall");
+    }
+
+    for r in targets {
+        let outcome = zc_runtime::ensure(&runtimes_root, &index, &r, &auth, config.runtimes.offline)
+            .await
+            .with_context(|| format!("instalando runtime '{r}'"))?;
+        tracing::info!(runtime = %r, ?outcome, "runtime listo");
+    }
+    Ok(())
+}
+
+/// Preflight de `serve` (§17): si `ensure_on_start`, asegura los `preinstall`
+/// antes de escuchar. Un fallo NO aborta el arranque — se avisa y el invoke de
+/// ese runtime devolverá `RuntimeUnavailable` (visible en `/health/ready`).
+async fn preflight_runtimes(config: &Config) {
+    if !config.runtimes.ensure_on_start || config.runtimes.preinstall.is_empty() {
+        return;
+    }
+    let runtimes_root = match absolute_path(&config.storage.runtimes) {
+        Ok(root) => root,
+        Err(error) => {
+            tracing::error!(%error, "preflight: no se pudo resolver storage.runtimes");
+            return;
+        }
+    };
+    let index = match load_index(&runtimes_root) {
+        Ok(index) => index,
+        Err(error) => {
+            tracing::warn!(%error, "preflight: sin índice de runtimes, no se instala nada");
+            return;
+        }
+    };
+    let auth = zc_runtime::registry_auth_from_env();
+    for r in &config.runtimes.preinstall {
+        match zc_runtime::ensure(&runtimes_root, &index, r, &auth, config.runtimes.offline).await {
+            Ok(outcome) => tracing::info!(runtime = %r, ?outcome, "preflight: runtime listo"),
+            Err(error) => tracing::warn!(
+                runtime = %r, %error,
+                "preflight: runtime no disponible (invoke devolverá RuntimeUnavailable)"
+            ),
+        }
+    }
+}
+
+/// Carga el índice de distribución de `<runtimes_root>/index.json` (§17). Ausente
+/// = índice vacío (no hay nada publicado que instalar).
+fn load_index(runtimes_root: &std::path::Path) -> Result<zc_runtime::Index> {
+    let path = runtimes_root.join("index.json");
+    zc_runtime::index::load(&path).with_context(|| format!("cargando índice {}", path.display()))
+}
+
 async fn run_serve(config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path)
         .with_context(|| format!("cargando configuración desde {}", config_path.display()))?;
     zc_telemetry::init();
+    preflight_runtimes(&config).await;
     let app = build_app(&config).await?;
     let listen = config.listen()?;
 
@@ -90,6 +180,10 @@ async fn build_app(config: &Config) -> Result<Router> {
         .context("abriendo artifact store")?;
     let work_root = artifact_root.join(".work");
     let runtimes_root = absolute_path(&config.storage.runtimes)?;
+    let runtime_readiness = RuntimeReadiness {
+        root: runtimes_root.clone(),
+        expected: config.runtimes.preinstall.clone(),
+    };
     let manager = FunctionManager::new(db.clone(), store.clone());
     let invoker = Invoker::new(
         db.clone(),
@@ -130,8 +224,36 @@ async fn build_app(config: &Config) -> Result<Router> {
         .layer(middleware::from_fn(record_request))
         .layer(Extension(db))
         .layer(Extension(store))
-        .layer(Extension(metrics));
+        .layer(Extension(metrics))
+        .layer(Extension(runtime_readiness));
     Ok(app)
+}
+
+/// Estado para el chequeo honesto de runtimes instalados en `/health/ready`
+/// (§31/§65). `expected` = los `[runtimes].preinstall`.
+#[derive(Clone)]
+struct RuntimeReadiness {
+    root: PathBuf,
+    expected: Vec<String>,
+}
+
+impl RuntimeReadiness {
+    /// `"n/a"` si no se esperan runtimes; `"ok"` si todos resuelven e integran;
+    /// `"missing"` si falta o está corrupto alguno de los esperados.
+    fn status(&self) -> &'static str {
+        if self.expected.is_empty() {
+            return "n/a";
+        }
+        if self
+            .expected
+            .iter()
+            .all(|r| zc_runtime::resolve(&self.root, r).is_ok())
+        {
+            "ok"
+        } else {
+            "missing"
+        }
+    }
 }
 
 fn absolute_path(path: &std::path::Path) -> Result<PathBuf> {
@@ -165,11 +287,14 @@ struct Readiness {
     database: &'static str,
     artifact_store: &'static str,
     runtime_manager: &'static str,
+    /// Bundles esperados (`[runtimes].preinstall`): `ok`/`missing`/`n/a` (§17).
+    runtimes: &'static str,
 }
 
 async fn ready(
     Extension(db): Extension<Database>,
     Extension(store): Extension<ArtifactStore>,
+    Extension(runtimes): Extension<RuntimeReadiness>,
 ) -> impl IntoResponse {
     let database = if db.healthy().await.unwrap_or(false) {
         "ok"
@@ -182,7 +307,12 @@ async fn ready(
     } else {
         "error"
     };
-    let status = if database == "ok" && artifact_store == "ok" && runtime_manager == "ok" {
+    let runtimes = runtimes.status();
+    let status = if database == "ok"
+        && artifact_store == "ok"
+        && runtime_manager == "ok"
+        && runtimes != "missing"
+    {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -193,6 +323,7 @@ async fn ready(
             database,
             artifact_store,
             runtime_manager,
+            runtimes,
         }),
     )
 }

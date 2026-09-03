@@ -15,8 +15,32 @@ cargo run -p xtask -- verify runtimes/python313-linux-arm64
 ```
 
 Sin `--target` usa el host; `--all` produce las combinaciones soportadas. Los
-directorios generados están **gitignored** (son pesados); solo se versiona este
-README.
+directorios generados están **gitignored** (son pesados); solo se versionan este
+README y `index.json` (el lockfile de distribución).
+
+## Distribución (§17): OCI artifacts + cache verificada
+
+En vez de ensamblar en cada host, los bundles Linux se **publican como OCI
+artifacts** en `ghcr.io/<org>/zapcloud` (tag `runtime-nodejs:22-<arch>` /
+`runtime-python:3.13-<arch>`) y se bajan verificados por digest:
+
+```
+# publica el bundle ya ensamblado + pinnea la entrada en runtimes/index.json
+cargo run -p xtask -- publish --runtime nodejs22.x --target linux-arm64
+
+# en un nodo desplegado: baja y verifica los bundles ausentes
+zapcloud runtimes install --runtime nodejs22.x   # o --config <path>
+```
+
+`runtimes/index.json` es el **lockfile pinneado**: para cada `runtime × plataforma`
+guarda `tree_sha256` + `oci_ref` + `oci_digest`. Es a la vez la fuente del pull
+(content-addressed, §15) y el **gate de reproducibilidad** de CI
+(`.github/workflows/runtimes.yml`): el build debe reproducir el `tree_sha256`
+pinneado o el job falla. La instalación es cache-only en el hot path del invoke;
+`ensure` (install/preflight) es lo único que toca la red.
+
+**Solo Linux se distribuye por OCI** (carril de referencia). Los bundles darwin
+son dev-only: se ensamblan localmente con `xtask bundle` y nunca se publican.
 
 ## Layout de un bundle (`nodejs22-<os>-<arch>/`)
 

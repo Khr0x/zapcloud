@@ -1,0 +1,125 @@
+# Build reproducible + distribución de runtime bundles como OCI artifacts (§17).
+#
+# - Ensambla los bundles Linux (carril de referencia, RIC real) en contenedor
+#   del target vía Docker. Solo x86_64: arm64 está fuera de scope hasta que haya
+#   un host Linux ARM objetivo (evita el compile del RIC nativo bajo QEMU).
+# - Gate de reproducibilidad: si `runtimes/index.json` ya pinnea un tree_sha256
+#   para ese runtime×plataforma, el build DEBE reproducirlo (falla si difiere).
+# - En `main`: publica cada bundle en ghcr.io y agrega el índice actualizado.
+name: runtimes
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "xtask/**"
+      - "zapcloud-functions/runtime/**"
+      - "runtimes/index.json"
+      - ".github/workflows/runtimes.yml"
+  push:
+    branches: [main]
+    paths:
+      - "xtask/**"
+      - "zapcloud-functions/runtime/**"
+      - ".github/workflows/runtimes.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [nodejs22.x, python3.13]
+        arch: [amd64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Resolver target/dir/plataforma
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64) BUNDLE_ARCH=x86_64 ;;
+            arm64) BUNDLE_ARCH=arm64 ;;
+          esac
+          case "${{ matrix.runtime }}" in
+            nodejs22.x) PREFIX=nodejs22 ;;
+            python3.13) PREFIX=python313 ;;
+          esac
+          echo "TARGET=linux-${BUNDLE_ARCH}" >> "$GITHUB_ENV"
+          echo "PLATFORM=linux-${BUNDLE_ARCH}" >> "$GITHUB_ENV"
+          echo "BUNDLE_DIR=runtimes/${PREFIX}-linux-${BUNDLE_ARCH}" >> "$GITHUB_ENV"
+
+      - name: Ensamblar bundle (clean-room, RIC real)
+        run: cargo run -p xtask -- bundle --runtime "${{ matrix.runtime }}" --target "$TARGET"
+
+      - name: Verificar integridad
+        run: cargo run -p xtask -- verify "$BUNDLE_DIR"
+
+      - name: Gate de reproducibilidad
+        run: |
+          PINNED=$(jq -r --arg r "${{ matrix.runtime }}" --arg p "$PLATFORM" \
+            '.[$r][$p].tree_sha256 // empty' runtimes/index.json)
+          BUILT=$(jq -r '.tree_sha256' "$BUNDLE_DIR/manifest.json")
+          if [ -n "$PINNED" ] && [ "$PINNED" != "$BUILT" ]; then
+            echo "::error::tree_sha256 no reproduce: pinneado=$PINNED build=$BUILT"
+            exit 1
+          fi
+          echo "reproducibilidad OK (pinneado='${PINNED:-<primera publicación>}' build=$BUILT)"
+
+      - name: Publicar en ghcr.io + actualizar índice
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZAPCLOUD_OCI_REGISTRY: ghcr.io/${{ github.repository }}
+        run: cargo run -p xtask -- publish --runtime "${{ matrix.runtime }}" --target "$TARGET"
+
+      - name: Subir SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.runtime }}-${{ matrix.arch }}
+          path: ${{ env.BUNDLE_DIR }}/sbom.cdx.json
+
+      - name: Subir fragmento de índice
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-${{ matrix.runtime }}-${{ matrix.arch }}
+          path: runtimes/index.json
+
+  # Agrega los fragmentos de índice de todas las plataformas y commitea el
+  # `runtimes/index.json` resultante en main (lockfile de distribución, §17).
+  update-index:
+    needs: bundle
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: index-*
+          path: fragments
+      - name: Merge determinista de fragmentos
+        run: |
+          # `*` hace deep-merge de objetos: los mapas por-runtime se combinan.
+          jq -s 'reduce .[] as $x ({}; . * $x)' fragments/index-*/index.json \
+            > runtimes/index.json
+          jq . runtimes/index.json
+      - name: Commit del índice si cambió
+        run: |
+          if git diff --quiet runtimes/index.json; then
+            echo "índice sin cambios"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add runtimes/index.json
+          git commit -m "chore(runtimes): actualizar index.json de distribución OCI (§17)"
+          git push

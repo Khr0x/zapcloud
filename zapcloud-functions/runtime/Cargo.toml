@@ -1,0 +1,33 @@
+[package]
+name = "zc-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Resolución de runtime → bundle + cache/distribución (§17). Concentra:
+#   - modelo de integridad del bundle (Manifest, tree_sha256, verify) — antes
+#     duplicado en xtask; ahora fuente única (lo consume xtask y el daemon).
+#   - resolución cache-only con verificación de integridad (hot path del invoke).
+#   - distribución: índice pinneado + pull/push de bundles como OCI artifacts.
+#
+# Regla de dependencias (§11): shared/-style, no depende de otros servicios.
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+# Distribución como OCI artifacts (§17): pull por digest + push.
+oci-client = { workspace = true }
+# Empaquetado del bundle como capa OCI (tar.gz), pure-Rust (sin shell-out en el
+# daemon). Preserva symlinks y modo, así el tree_sha256 round-trips.
+tar = { workspace = true }
+flate2 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

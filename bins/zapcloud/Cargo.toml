@@ -22,6 +22,8 @@ zc-persistence.workspace = true
 zc-artifact-store.workspace = true
 zc-invocation.workspace = true
 zc-aws-protocol.workspace = true
+# Instalación/preflight de runtime bundles (§17): `runtimes install` + readiness.
+zc-runtime.workspace = true
 # Para el subcomando `spike` (demo manual del loop Runtime API, §18).
 tokio.workspace = true
 anyhow.workspace = true

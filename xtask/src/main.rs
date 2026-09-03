@@ -9,6 +9,7 @@
 //!   cargo run -p xtask -- verify <bundle-dir>
 
 mod bundle;
+mod publish;
 
 use anyhow::{bail, Context, Result};
 
@@ -17,6 +18,7 @@ fn main() -> Result<()> {
     let task = args.next().unwrap_or_default();
     match task.as_str() {
         "bundle" => bundle::run(args.collect()),
+        "publish" => publish::run(args.collect()),
         "verify" => {
             let dir = args
                 .next()
@@ -26,9 +28,10 @@ fn main() -> Result<()> {
         "golden" => bail!("xtask: 'golden' aún no implementado (paso 14, §70)"),
         "" => {
             eprintln!(
-                "uso: cargo run -p xtask -- <bundle|verify|golden>\n\
+                "uso: cargo run -p xtask -- <bundle|publish|verify|golden>\n\
                  \n\
                  bundle --runtime <nodejs22.x|python3.13> [--target <os-arch>[,..]] [--all] [--out DIR]\n\
+                 publish --runtime <r> [--target <os-arch>] [--registry <base>] [--out DIR] [--index PATH]\n\
                  verify <bundle-dir>"
             );
             Ok(())
