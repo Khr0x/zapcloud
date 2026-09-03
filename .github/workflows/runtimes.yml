@@ -5,7 +5,9 @@
 #   un host Linux ARM objetivo (evita el compile del RIC nativo bajo QEMU).
 # - Gate de reproducibilidad: si `runtimes/index.json` ya pinnea un tree_sha256
 #   para ese runtime×plataforma, el build DEBE reproducirlo (falla si difiere).
-# - En `main`: publica cada bundle en ghcr.io y agrega el índice actualizado.
+# - En `main`: publica cada bundle en ghcr.io y abre/actualiza un PR con el
+#   `runtimes/index.json` regenerado (lockfile §17). El pin del runtime se revisa
+#   antes de mergear; main nunca recibe un commit del índice sin review.
 name: runtimes
 
 on:
@@ -93,14 +95,13 @@ jobs:
           name: index-${{ matrix.runtime }}-${{ matrix.arch }}
           path: runtimes/index.json
 
-  # Agrega los fragmentos de índice de todas las plataformas y commitea el
-  # `runtimes/index.json` resultante en main (lockfile de distribución, §17).
+  # Agrega los fragmentos de índice de todas las plataformas y abre/actualiza un
+  # PR con el `runtimes/index.json` resultante (lockfile de distribución, §17).
+  # No pushea a main: el pin del runtime pasa por review, como una bump de dep.
   update-index:
     needs: bundle
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -113,13 +114,32 @@ jobs:
           jq -s 'reduce .[] as $x ({}; . * $x)' fragments/index-*/index.json \
             > runtimes/index.json
           jq . runtimes/index.json
-      - name: Commit del índice si cambió
-        run: |
-          if git diff --quiet runtimes/index.json; then
-            echo "índice sin cambios"; exit 0
-          fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add runtimes/index.json
-          git commit -m "chore(runtimes): actualizar index.json de distribución OCI (§17)"
-          git push
+
+      # App token (no el GITHUB_TOKEN): un PR abierto con el token por defecto NO
+      # dispara workflows, así que los checks no correrían sobre el PR del índice.
+      # El App necesita permisos Contents:RW + Pull requests:RW e instalarse en el repo.
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.RUNTIMES_BOT_APP_ID }}
+          private-key: ${{ secrets.RUNTIMES_BOT_PRIVATE_KEY }}
+
+      # Idempotente: sin diff no abre PR; con diff, actualiza SIEMPRE la misma
+      # rama/PR (`ci/update-runtime-index`), nunca duplica. Ver nota de bucle abajo.
+      - name: Abrir/actualizar PR con el índice
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          add-paths: runtimes/index.json
+          branch: ci/update-runtime-index
+          base: main
+          delete-branch: true
+          commit-message: "chore(runtimes): actualizar index.json de distribución OCI (§17)"
+          title: "chore(runtimes): actualizar index.json de distribución OCI (§17)"
+          body: |
+            Índice de distribución regenerado tras publicar los bundles a ghcr.io.
+            Pins nuevos: `oci_digest` + `tree_sha256` por runtime×plataforma.
+
+            **Revisar antes de mergear:** que los digests correspondan a los bundles
+            recién publicados. Mergear adopta esos bundles como los que instalará
+            `zapcloud runtimes install` / el preflight de `serve` (§17).
