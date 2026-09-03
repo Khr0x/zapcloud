@@ -99,7 +99,7 @@ impl FunctionManager {
         validate::validate_memory(req.memory_size)?;
         validate::validate_timeout(req.timeout)?;
         validate::validate_zip_size(req.code.len())?;
-        validate::validate_deployment_zip(&req.code)?;
+        validate::validate_deployment_zip(&req.code, &req.runtime)?;
 
         match PackageType::from_str(&req.package_type)? {
             PackageType::Zip => {}
@@ -216,12 +216,16 @@ impl FunctionManager {
         expected_revision: Option<&str>,
     ) -> Result<FunctionDetails> {
         validate::validate_zip_size(code.len())?;
-        validate::validate_deployment_zip(code)?;
 
-        // Existencia primero → NotFound limpio antes de escribir blob.
-        if self.db.get_function_by_name(name).await?.is_none() {
-            return Err(ManagerError::NotFound(name.to_string()));
-        }
+        // Existencia primero → NotFound limpio antes de escribir blob; además
+        // da el runtime para validar el ZIP contra su contrato (bootstrap del
+        // ZIP para provided.*, solo código para bundles).
+        let existing = self
+            .db
+            .get_function_by_name(name)
+            .await?
+            .ok_or_else(|| ManagerError::NotFound(name.to_string()))?;
+        validate::validate_deployment_zip(code, &existing.runtime)?;
 
         let stored = self.store.put(code).await?;
         let result = self

@@ -5,6 +5,8 @@ region = "local-1"
 [storage]
 metadata = "sqlite://./data/zapcloud.db"
 artifacts = "./data/artifacts"
+# Raíz de los runtime bundles (§16/§17), generados con `xtask bundle`.
+runtimes = "./runtimes"
 
 [security]
 tenant_trust = "trusted"

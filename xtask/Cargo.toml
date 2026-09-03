@@ -14,3 +14,11 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+# reqwest del workspace trae `blocking` pero sin TLS; el bundle descarga desde
+# https://nodejs.org, así que xtask habilita rustls-tls (§16 descarga verificada).
+reqwest = { workspace = true, features = ["rustls-tls"] }

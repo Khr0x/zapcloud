@@ -1,12 +1,38 @@
 //! xtask — automatización del repo (patrón cargo-xtask).
 //!
-//! Tareas previstas: `bundle` (ensamblar runtime bundles clean-room con SBOM
-//! + licencias, §16), `golden` (paridad contra AWS real, §70). v0.1: esqueleto.
+//! Tareas: `bundle` (ensamblar runtime bundles clean-room con SBOM + licencias,
+//! §16-17), `golden` (paridad contra AWS real, §70 — aún scaffold).
+//!
+//! Uso:
+//!   cargo run -p xtask -- bundle --runtime <nodejs22.x|python3.13> [--target <os-arch>[,..]] [--out DIR]
+//!   cargo run -p xtask -- bundle --runtime python3.13 --all
+//!   cargo run -p xtask -- verify <bundle-dir>
 
-fn main() {
-    let task = std::env::args().nth(1).unwrap_or_default();
+mod bundle;
+
+use anyhow::{bail, Context, Result};
+
+fn main() -> Result<()> {
+    let mut args = std::env::args().skip(1);
+    let task = args.next().unwrap_or_default();
     match task.as_str() {
-        "" => eprintln!("uso: cargo run -p xtask -- <bundle|golden>"),
-        other => eprintln!("xtask: tarea '{other}' aún no implementada (scaffold v0.1)"),
+        "bundle" => bundle::run(args.collect()),
+        "verify" => {
+            let dir = args
+                .next()
+                .context("uso: cargo run -p xtask -- verify <bundle-dir>")?;
+            bundle::verify_cli(&dir)
+        }
+        "golden" => bail!("xtask: 'golden' aún no implementado (paso 14, §70)"),
+        "" => {
+            eprintln!(
+                "uso: cargo run -p xtask -- <bundle|verify|golden>\n\
+                 \n\
+                 bundle --runtime <nodejs22.x|python3.13> [--target <os-arch>[,..]] [--all] [--out DIR]\n\
+                 verify <bundle-dir>"
+            );
+            Ok(())
+        }
+        other => bail!("xtask: tarea '{other}' desconocida"),
     }
 }

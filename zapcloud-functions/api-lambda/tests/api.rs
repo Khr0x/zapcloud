@@ -45,7 +45,7 @@ async fn setup_with_auth(auth: AuthMode) -> (axum::Router, TempDir) {
         .await
         .expect("store");
     let manager = FunctionManager::new(db.clone(), store.clone());
-    let invoker = Invoker::new(db, store, temp.0.join("work"), "local-1");
+    let invoker = Invoker::new(db, store, temp.0.join("work"), temp.0.join("runtimes"), "local-1");
     (router(manager, invoker, LambdaApiConfig::local(auth)), temp)
 }
 
@@ -379,16 +379,17 @@ async fn valida_errores_de_entrada_y_paginacion() {
     );
     assert_eq!(body_json(invalid_query).await["Type"], "User");
 
-    let node = app
+    // Runtime del carril Native rechazado en la ruta AWS (regla dura §39).
+    let wasm = app
         .clone()
         .oneshot(json_request(
             "POST",
             "/2015-03-31/functions",
-            create_body("node", "nodejs22.x"),
+            create_body("wasm-fn", "wasm32-wasi"),
         ))
         .await
         .unwrap();
-    assert_eq!(node.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(wasm.status(), StatusCode::BAD_REQUEST);
 
     let malformed = app
         .clone()

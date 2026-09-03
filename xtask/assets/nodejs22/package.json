@@ -1,0 +1,10 @@
+{
+  "name": "zapcloud-nodejs22-ric",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Árbol npm pinneado para ensamblar el bundle nodejs22.x (§16/§19). Solo el RIC de AWS (Apache-2.0); ningún artefacto de Amazon Linux.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "aws-lambda-ric": "4.0.2"
+  }
+}

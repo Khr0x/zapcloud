@@ -24,7 +24,13 @@ const BOOTSTRAP_NAME: &str = "bootstrap";
 
 /// Runtimes del carril Compatibility aceptados en la ruta AWS (§7, §38, §39).
 /// `wasm32-wasi` NO está: es carril Native, solo por `/api/*` (§39).
-pub const ENABLED_RUNTIMES: &[&str] = &["provided.al2023"];
+pub const ENABLED_RUNTIMES: &[&str] = &["provided.al2023", "nodejs22.x", "python3.13"];
+
+/// ¿El bootstrap lo aporta el ZIP del usuario (`provided.*`) o el bundle
+/// (Node/Python)? Solo los primeros exigen un `bootstrap` en la raíz del ZIP.
+pub fn runtime_bootstrap_in_zip(runtime: &str) -> bool {
+    runtime.starts_with("provided.")
+}
 
 /// Arquitecturas soportadas (§7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,14 +173,16 @@ pub fn validate_zip_size(len: usize) -> Result<(), ManagerError> {
 
 /// Valida el paquete `provided.al2023` antes de persistirlo. La extracción
 /// vuelve a aplicar estas defensas porque ambos puntos son fronteras de datos.
-pub fn validate_deployment_zip(code: &[u8]) -> Result<(), ManagerError> {
-    validate_deployment_zip_with_limit(code, MAX_UNPACKED_BYTES)
+pub fn validate_deployment_zip(code: &[u8], runtime: &str) -> Result<(), ManagerError> {
+    validate_deployment_zip_with_limit(code, runtime, MAX_UNPACKED_BYTES)
 }
 
 fn validate_deployment_zip_with_limit(
     code: &[u8],
+    runtime: &str,
     max_unpacked_bytes: u64,
 ) -> Result<(), ManagerError> {
+    let require_bootstrap = runtime_bootstrap_in_zip(runtime);
     let invalid = |message: String| ManagerError::InvalidParameter {
         field: "code",
         message,
@@ -206,7 +214,7 @@ fn validate_deployment_zip_with_limit(
         }
     }
 
-    if !has_bootstrap {
+    if require_bootstrap && !has_bootstrap {
         return Err(invalid(format!(
             "el ZIP no contiene `{BOOTSTRAP_NAME}` en la raíz"
         )));
@@ -237,8 +245,8 @@ mod tests {
     #[test]
     fn runtime_solo_aws_compatibles() {
         assert!(validate_runtime("provided.al2023").is_ok());
-        assert!(validate_runtime("nodejs22.x").is_err());
-        assert!(validate_runtime("python3.13").is_err());
+        assert!(validate_runtime("nodejs22.x").is_ok());
+        assert!(validate_runtime("python3.13").is_ok()); // habilitado en el paso 10
         assert!(validate_runtime("wasm32-wasi").is_err());
         assert!(validate_runtime("cobol").is_err());
     }
@@ -298,11 +306,19 @@ mod tests {
     }
 
     #[test]
-    fn deployment_zip_exige_bootstrap_y_limite_descomprimido() {
-        assert!(validate_deployment_zip(&zip(&[("bootstrap", b"ok")])).is_ok());
-        assert!(validate_deployment_zip(&zip(&[("index.js", b"no")])).is_err());
-        assert!(validate_deployment_zip_with_limit(&zip(&[("bootstrap", b"1234")]), 3).is_err());
-        assert!(validate_deployment_zip(b"no-es-zip").is_err());
-        assert!(validate_deployment_zip(&zip(&[("../bootstrap", b"bad")])).is_err());
+    fn deployment_zip_exige_bootstrap_solo_para_provided() {
+        // provided.al2023: exige `bootstrap` en la raíz.
+        assert!(validate_deployment_zip(&zip(&[("bootstrap", b"ok")]), "provided.al2023").is_ok());
+        assert!(validate_deployment_zip(&zip(&[("index.js", b"no")]), "provided.al2023").is_err());
+        // nodejs22.x: el bootstrap lo aporta el bundle; el ZIP solo trae código.
+        assert!(validate_deployment_zip(&zip(&[("index.js", b"ok")]), "nodejs22.x").is_ok());
+        assert!(validate_deployment_zip(&zip(&[("bootstrap", b"ok")]), "nodejs22.x").is_ok());
+        // Límites y seguridad aplican a todos los runtimes.
+        assert!(
+            validate_deployment_zip_with_limit(&zip(&[("bootstrap", b"1234")]), "provided.al2023", 3)
+                .is_err()
+        );
+        assert!(validate_deployment_zip(b"no-es-zip", "nodejs22.x").is_err());
+        assert!(validate_deployment_zip(&zip(&[("../x.js", b"bad")]), "nodejs22.x").is_err());
     }
 }

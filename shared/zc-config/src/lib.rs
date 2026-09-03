@@ -60,6 +60,9 @@ impl Default for ServerConfig {
 pub struct StorageConfig {
     pub metadata: String,
     pub artifacts: PathBuf,
+    /// Raíz de los runtime bundles (§16/§17), ensamblados por `xtask bundle`.
+    #[serde(default = "default_runtimes")]
+    pub runtimes: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -192,6 +195,10 @@ fn default_region() -> String {
 
 fn default_executor() -> String {
     "process".into()
+}
+
+fn default_runtimes() -> PathBuf {
+    PathBuf::from("./runtimes")
 }
 
 fn default_true() -> bool {

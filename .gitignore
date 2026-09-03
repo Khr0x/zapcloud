@@ -10,5 +10,9 @@ Cargo.lock.orig
 .env.*
 !.env.example
 
+# Runtime bundles ensamblados (pesados): se generan con `cargo run -p xtask -- bundle`
+/runtimes/*
+!/runtimes/README.md
+
 # Local roadmap draft
 ROADMAP_MVP.md

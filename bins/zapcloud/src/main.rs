@@ -89,11 +89,13 @@ async fn build_app(config: &Config) -> Result<Router> {
         .await
         .context("abriendo artifact store")?;
     let work_root = artifact_root.join(".work");
+    let runtimes_root = absolute_path(&config.storage.runtimes)?;
     let manager = FunctionManager::new(db.clone(), store.clone());
     let invoker = Invoker::new(
         db.clone(),
         store.clone(),
         work_root,
+        runtimes_root,
         config.server.region.clone(),
     );
     let auth = match config.auth.mode {

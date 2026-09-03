@@ -1,0 +1,4 @@
+# Deps pinneadas para ensamblar el bundle python3.13 (§16/§19).
+# Solo el RIC de AWS (Apache-2.0); ningún artefacto de Amazon Linux.
+# ponytail: pin por versión; hash-lock (--require-hashes) = paso 11 (§17).
+awslambdaric==4.0.2

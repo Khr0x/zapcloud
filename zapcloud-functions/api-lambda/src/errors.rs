@@ -80,6 +80,8 @@ impl From<InvocationError> for ApiError {
             InvocationError::Unsupported(_) | InvocationError::InvalidArtifact(_) => {
                 Self::new(AwsErrorCode::InvalidParameterValue, error.to_string())
             }
+            // Bundle ausente: problema de operación → ServiceException (§71).
+            InvocationError::RuntimeUnavailable(msg) => Self::service(msg),
             InvocationError::Persistence(error) => Self::internal(error),
             InvocationError::Storage(error) => Self::internal(error),
             InvocationError::Execution(error) => Self::internal(error),

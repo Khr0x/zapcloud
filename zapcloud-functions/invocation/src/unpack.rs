@@ -1,9 +1,14 @@
 //! Desempaquetado seguro del ZIP de la función en su task_root (§16, §21).
 //!
-//! El paquete `provided.al2023` trae un ejecutable `bootstrap` en la raíz. Se
-//! extrae a `<task_root>/` y se devuelve el path del `bootstrap` con permiso de
-//! ejecución. Endurecido contra los riesgos clásicos de descompresión (§82):
-//! path traversal (zip-slip) y bombas de descompresión (límite de tamaño §35).
+//! El ZIP se extrae a `<task_root>/` (equivalente a `/var/task`). De dónde sale
+//! el ejecutable de arranque depende del runtime:
+//!   - `provided.*`: el propio ZIP trae un `bootstrap` en la raíz
+//!     (`provided_bootstrap`).
+//!   - bundles Node/Python: el bootstrap + RIC vienen del **bundle** (§16/§19),
+//!     no del ZIP; aquí solo se desempaqueta el código de usuario.
+//!
+//! Endurecido contra los riesgos clásicos de descompresión (§82): path
+//! traversal (zip-slip) y bombas de descompresión (límite de tamaño §35).
 
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -16,13 +21,14 @@ const MAX_UNPACKED_BYTES: u64 = 250 * 1024 * 1024;
 /// Nombre del ejecutable de arranque en el contrato `provided.al2023` (§16).
 const BOOTSTRAP_NAME: &str = "bootstrap";
 
-/// Descomprime `bytes` (un ZIP) dentro de `dest` y devuelve el path del
-/// `bootstrap`, con permiso de ejecución.
+/// Descomprime `bytes` (un ZIP) dentro de `dest` (el task_root / `/var/task`).
+/// No exige ni resuelve el bootstrap — eso depende del runtime (ver
+/// `provided_bootstrap`).
 ///
 /// Operación **bloqueante** (el crate `zip` es síncrono): invócala desde
 /// `tokio::task::spawn_blocking`.
-pub(crate) fn prepare_task_root(bytes: Vec<u8>, dest: PathBuf) -> Result<PathBuf> {
-    std::fs::create_dir_all(&dest).with_context(|| format!("creando task_root {dest:?}"))?;
+pub(crate) fn unpack_code(bytes: Vec<u8>, dest: &Path) -> Result<()> {
+    std::fs::create_dir_all(dest).with_context(|| format!("creando task_root {dest:?}"))?;
 
     let mut archive =
         zip::ZipArchive::new(Cursor::new(bytes)).context("el artifact no es un ZIP válido")?;
@@ -66,7 +72,13 @@ pub(crate) fn prepare_task_root(bytes: Vec<u8>, dest: PathBuf) -> Result<PathBuf
         set_mode(&out_path, entry.unix_mode())?;
     }
 
-    let bootstrap = dest.join(BOOTSTRAP_NAME);
+    Ok(())
+}
+
+/// Localiza el `bootstrap` que el ZIP `provided.*` debe traer en su raíz, con
+/// permiso de ejecución. Falla si no existe (contrato `provided.al2023`, §16).
+pub(crate) fn provided_bootstrap(task_root: &Path) -> Result<PathBuf> {
+    let bootstrap = task_root.join(BOOTSTRAP_NAME);
     if !bootstrap.is_file() {
         bail!(
             "el ZIP no contiene un ejecutable `{BOOTSTRAP_NAME}` en la raíz \

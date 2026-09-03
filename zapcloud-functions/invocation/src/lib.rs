@@ -10,9 +10,10 @@
 //!      `ProcessExecutor` (`zc-executor-sandbox`) y lo mantiene **warm** (§22),
 //!   5. devuelve la respuesta (`RequestResponse` síncrono, §43).
 //!
-//! Alcance v0.1: process mode / T1 **sin aislamiento**, solo `provided.al2023`
-//! (los bundles Node/Python son v0.1.1). Scheduler/pool, idle-timeout y evicción
-//! son v0.2 (§23, §26, §28); la cola async + retries son v0.3 (§44–§46).
+//! Alcance v0.1.1: process mode / T1 **sin aislamiento**; `provided.al2023`
+//! (bootstrap del ZIP) y `nodejs22.x` (bootstrap + RIC del bundle, §16/§19).
+//! Scheduler/pool, idle-timeout y evicción son v0.2 (§23, §26, §28); la cola
+//! async + retries son v0.3 (§44–§46).
 //!
 //! DISCIPLINA §37: se depende del executor **concreto** (`zc-executor-sandbox`),
 //! no de `executor-core`. El `trait Executor` no se estabiliza hasta que exista
@@ -25,6 +26,7 @@
 //!   FunctionError outcome → 200 con `FunctionError` (framing de invoke, §43/§71)
 //!   Execution       → ServiceException (fallo interno del executor)
 
+mod runtime;
 mod unpack;
 
 use std::collections::HashMap;
@@ -39,11 +41,11 @@ use zc_persistence::{Database, Function};
 
 pub use zc_executor_sandbox::InvokeOutcome;
 
-/// Único runtime que ejecuta en v0.1 (§16 paso 1). Node/Python: v0.1.1.
-const PROVIDED_RUNTIME: &str = "provided.al2023";
 /// Único package type que ejecuta en v0.1 (§7). Image: v0.5.
 const ZIP_PACKAGE_TYPE: &str = "Zip";
-/// `LAMBDA_RUNTIME_DIR` (§16). Placeholder en process mode sin chroot.
+/// `LAMBDA_RUNTIME_DIR` (§16) para `provided.*`: placeholder en process mode sin
+/// chroot (el bootstrap del ZIP vive en el task_root). Los bundles Node/Python
+/// aportan un runtime_dir real (ver `runtime::resolve`).
 const RUNTIME_DIR: &str = "/var/runtime";
 
 /// Error de dominio del camino de invocación. Sin framing AWS (eso es `api-lambda`).
@@ -53,6 +55,10 @@ pub enum InvocationError {
     NotFound(String),
     #[error("no soportado en v0.1: {0}")]
     Unsupported(String),
+    /// El runtime es soportado pero su bundle no está instalado (problema de
+    /// operación, no del llamador). `api-lambda` lo mapea a ServiceException.
+    #[error("runtime no disponible: {0}")]
+    RuntimeUnavailable(String),
     #[error("artifact inválido: {0}")]
     InvalidArtifact(String),
     #[error(transparent)]
@@ -91,6 +97,9 @@ pub struct Invoker {
     store: ArtifactStore,
     /// Base donde se desempaquetan los task_roots de cada environment.
     work_root: PathBuf,
+    /// Raíz de los runtime bundles (§16/§17), p.ej. `./runtimes`. De aquí sale
+    /// el bootstrap + RIC de los runtimes con bundle (Node/Python).
+    runtimes_root: PathBuf,
     /// Región del endpoint, propagada al contrato de entorno del runtime.
     region: String,
     /// El lock del mapa solo protege el registro; cada environment tiene su
@@ -103,12 +112,14 @@ impl Invoker {
         db: Database,
         store: ArtifactStore,
         work_root: PathBuf,
+        runtimes_root: PathBuf,
         region: impl Into<String>,
     ) -> Self {
         Self {
             db,
             store,
             work_root,
+            runtimes_root,
             region: region.into(),
             envs: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -128,13 +139,9 @@ impl Invoker {
             .await?
             .ok_or_else(|| InvocationError::NotFound(function_name.to_string()))?;
 
-        // 2. Guardas honestas (§16 staging / §31: no fingir capacidades).
-        if function.runtime != PROVIDED_RUNTIME {
-            return Err(InvocationError::Unsupported(format!(
-                "runtime '{}': v0.1 solo ejecuta {PROVIDED_RUNTIME} (Node/Python llegan en v0.1.1)",
-                function.runtime
-            )));
-        }
+        // 2. Guardas honestas (§16 staging / §31: no fingir capacidades). El
+        //    runtime se valida al resolver su bundle en cold_start (soportado /
+        //    no soportado / bundle ausente).
         if function.package_type != ZIP_PACKAGE_TYPE {
             return Err(InvocationError::Unsupported(format!(
                 "package_type '{}': v0.1 solo Zip (Image llega en v0.5)",
@@ -230,20 +237,43 @@ impl Invoker {
                 InvocationError::InvalidArtifact(format!("artifact {artifact_id} ausente en la DB"))
             })?;
 
+        // Resolver el runtime → origen del bootstrap (ZIP vs bundle, §16/§19).
+        // Valida runtime soportado y, para bundles, que estén instalados.
+        let source = runtime::resolve(&self.runtimes_root, &function.runtime)?;
+
         // Integridad (§15) + bytes del ZIP.
         self.store.verify(&artifact.sha256).await?;
         let bytes = self.store.read(&artifact.sha256).await?;
 
-        // Desempaquetar en un task_root propio (dir = revision_id: único y seguro).
+        // Desempaquetar el código en un task_root propio (dir = revision_id:
+        // único y seguro). Para `provided.*` el bootstrap está en el ZIP; para
+        // bundles solo se desempaqueta el código de usuario.
         let task_root = self.work_root.join(&function.revision_id);
         let dest = task_root.clone();
-        let bootstrap_path =
-            tokio::task::spawn_blocking(move || unpack::prepare_task_root(bytes, dest))
-                .await
-                .map_err(|e| {
-                    InvocationError::Execution(anyhow::anyhow!("join del desempaquetado: {e}"))
-                })?
-                .map_err(|e| InvocationError::InvalidArtifact(e.to_string()))?;
+        let needs_zip_bootstrap = matches!(source, runtime::RuntimeSource::ZipProvided);
+        let zip_bootstrap = tokio::task::spawn_blocking(move || {
+            unpack::unpack_code(bytes, &dest)?;
+            if needs_zip_bootstrap {
+                unpack::provided_bootstrap(&dest).map(Some)
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+        .map_err(|e| InvocationError::Execution(anyhow::anyhow!("join del desempaquetado: {e}")))?
+        .map_err(|e| InvocationError::InvalidArtifact(e.to_string()))?;
+
+        // El bootstrap + runtime_dir salen del ZIP (provided) o del bundle.
+        let (bootstrap_path, runtime_dir) = match source {
+            runtime::RuntimeSource::ZipProvided => (
+                zip_bootstrap.expect("provided garantiza bootstrap del ZIP"),
+                PathBuf::from(RUNTIME_DIR),
+            ),
+            runtime::RuntimeSource::Bundle {
+                bootstrap,
+                runtime_dir,
+            } => (bootstrap, runtime_dir),
+        };
 
         // Arrancar el proceso con el contrato de entorno §16 (§21).
         let executor = ProcessExecutor::start()
@@ -254,7 +284,7 @@ impl Invoker {
             handler: function.handler.clone(),
             bootstrap_path,
             task_root: task_root.clone(),
-            runtime_dir: PathBuf::from(RUNTIME_DIR),
+            runtime_dir,
             memory_size: function.memory_size,
             region: self.region.clone(),
             log_group: format!("/aws/lambda/{}", function.name),
