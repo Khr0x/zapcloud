@@ -60,7 +60,11 @@ pub fn oci_ref(registry_base: &str, runtime: &str, arch: &str) -> Result<String>
         "python3.13" => ("runtime-python", format!("3.13-{arch}")),
         other => bail!("runtime '{other}' no tiene bundle distribuible por OCI"),
     };
-    let base = registry_base.trim_end_matches('/');
+    // OCI exige que el nombre del repositorio (host + namespace + repo) sea todo
+    // en minúsculas. `github.repository` conserva el case del owner (p.ej.
+    // `Khr0x/zapcloud`), así que normalizamos el base o `ghcr.io` rechaza el push
+    // con `invalid reference format`. El tag ya es minúsculas por construcción.
+    let base = registry_base.trim_end_matches('/').to_lowercase();
     Ok(format!("{base}/{repo}:{tag}"))
 }
 
@@ -179,6 +183,15 @@ mod tests {
             "ghcr.io/org/zapcloud/runtime-python:3.13-amd64"
         );
         assert!(oci_ref("ghcr.io/org", "ruby3.2", "arm64").is_err());
+    }
+
+    #[test]
+    fn oci_ref_lowercases_owner() {
+        // github.repository conserva el case del owner; OCI exige minúsculas.
+        assert_eq!(
+            oci_ref("ghcr.io/Khr0x/zapcloud", "nodejs22.x", "x86_64").unwrap(),
+            "ghcr.io/khr0x/zapcloud/runtime-nodejs:22-amd64"
+        );
     }
 
     /// Round-trip real contra un registry OCI. Requiere uno corriendo y su ref
