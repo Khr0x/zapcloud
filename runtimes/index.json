@@ -1,1 +1,21 @@
-{}
+{
+  "nodejs22.x": {
+    "linux-x86_64": {
+      "interpreter_version": "22.11.0",
+      "ric_version": "4.0.2",
+      "tree_sha256": "9881a659457aa07d9b45d9a9fed630b58493734c501535f01904de0eb4fde340",
+      "oci_ref": "ghcr.io/khr0x/zapcloud/runtime-nodejs:22-amd64",
+      "oci_digest": "sha256:223fa61871623d3d19a5f1f904c48177f117cdd647365ed54bccdf08ce23b8b5"
+    }
+  },
+  "python3.13": {
+    "linux-x86_64": {
+      "interpreter_version": "3.13.15",
+      "ric_version": "4.0.2",
+      "pbs_release": "20260825",
+      "tree_sha256": "7567962a9e6ae33e187f8c83d7f2d35173431cad5e7a96f244c2b7d5a969cbb4",
+      "oci_ref": "ghcr.io/khr0x/zapcloud/runtime-python:3.13-amd64",
+      "oci_digest": "sha256:6d89ec76bc2d2948ec5c7ed0b8f1acf00293247e1f63852d852dfeb192b621f2"
+    }
+  }
+}
