@@ -21,6 +21,7 @@ members = [
     "zapcloud-functions/api-lambda",         # AWS strict /2015-03-31/* (§12)
     "zapcloud-functions/function-manager",   # CRUD + metadata (§13)
     "zapcloud-functions/invocation",         # sync/async (§43-45)
+    "zapcloud-functions/runtime",            # resolución + cache + distribución (§17)
     "zapcloud-functions/executor-core",      # trait Executor — INESTABLE hasta v0.8 (§37)
     "zapcloud-functions/executor-sandbox",   # único executor obligatorio en v1 (§37)
 
@@ -49,6 +50,7 @@ zc-executor-sandbox = { path = "zapcloud-functions/executor-sandbox" }
 zc-invocation = { path = "zapcloud-functions/invocation" }
 zc-function-manager = { path = "zapcloud-functions/function-manager" }
 zc-api-lambda = { path = "zapcloud-functions/api-lambda" }
+zc-runtime = { path = "zapcloud-functions/runtime" }
 
 # Externos. Stack del RFC de Lambda §10 (Rust/Tokio/Axum/Serde).
 # Introducidos por el spike de v0.1 (loop Runtime API, §18); el workspace no
@@ -83,3 +85,10 @@ time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 # Desempaquetado de ZIP de funciones (§16). Introducido por el paso 5
 # (zc-invocation): monta el artifact real en el task_root del environment.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Distribución de bundles como OCI artifacts + build reproducible (§17).
+# Introducidos por el paso 11 (zc-runtime): pull/push de bundles contra ghcr.io,
+# empaquetados como capa tar.gz pure-Rust (preserva symlinks/modo).
+oci-client = { version = "0.15", default-features = false, features = ["rustls-tls"] }
+tar = "0.4"
+flate2 = "1"

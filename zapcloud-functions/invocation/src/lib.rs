@@ -20,13 +20,16 @@
 //! un 2º executor (WASM, v0.8); antes sería abstracción prematura.
 //!
 //! Mapeo a los errores observables de AWS (§71) lo hace `api-lambda` (paso 6):
-//!   NotFound        → ResourceNotFoundException
-//!   Unsupported     → InvalidParameterValueException
-//!   InvalidArtifact → InvalidParameterValueException
+//!   NotFound           → ResourceNotFoundException
+//!   Unsupported        → InvalidParameterValueException
+//!   InvalidArtifact    → InvalidParameterValueException
+//!   RuntimeUnavailable → ServiceException (bundle ausente/corrupto: operación)
 //!   FunctionError outcome → 200 con `FunctionError` (framing de invoke, §43/§71)
-//!   Execution       → ServiceException (fallo interno del executor)
+//!   Execution          → ServiceException (fallo interno del executor)
+//!
+//! La resolución runtime → bundle vive en `zc-runtime` (§17); sus errores se
+//! mapean vía `From<RuntimeError>` (abajo).
 
-mod runtime;
 mod unpack;
 
 use std::collections::HashMap;
@@ -38,6 +41,7 @@ use tokio::sync::{Mutex, RwLock};
 use zc_artifact_store::ArtifactStore;
 use zc_executor_sandbox::{Environment, FunctionSpec, ProcessExecutor};
 use zc_persistence::{Database, Function};
+use zc_runtime::{resolve as resolve_runtime, RuntimeError, RuntimeSource};
 
 pub use zc_executor_sandbox::InvokeOutcome;
 
@@ -69,6 +73,21 @@ pub enum InvocationError {
     /// proceso no respondió.
     #[error("error de ejecución: {0}")]
     Execution(anyhow::Error),
+}
+
+/// Mapeo de los errores de resolución (`zc-runtime`, §17) a los del invocador:
+///   Unsupported          → Unsupported (InvalidParameterValueException)
+///   Unavailable/Integrity/Other → RuntimeUnavailable (ServiceException)
+/// Un bundle corrupto es un problema de operación, no del llamador.
+impl From<RuntimeError> for InvocationError {
+    fn from(err: RuntimeError) -> Self {
+        match err {
+            RuntimeError::Unsupported(msg) => InvocationError::Unsupported(msg),
+            RuntimeError::Unavailable(msg)
+            | RuntimeError::Integrity(msg) => InvocationError::RuntimeUnavailable(msg),
+            RuntimeError::Other(err) => InvocationError::RuntimeUnavailable(err.to_string()),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, InvocationError>;
@@ -239,7 +258,7 @@ impl Invoker {
 
         // Resolver el runtime → origen del bootstrap (ZIP vs bundle, §16/§19).
         // Valida runtime soportado y, para bundles, que estén instalados.
-        let source = runtime::resolve(&self.runtimes_root, &function.runtime)?;
+        let source = resolve_runtime(&self.runtimes_root, &function.runtime)?;
 
         // Integridad (§15) + bytes del ZIP.
         self.store.verify(&artifact.sha256).await?;
@@ -250,7 +269,7 @@ impl Invoker {
         // bundles solo se desempaqueta el código de usuario.
         let task_root = self.work_root.join(&function.revision_id);
         let dest = task_root.clone();
-        let needs_zip_bootstrap = matches!(source, runtime::RuntimeSource::ZipProvided);
+        let needs_zip_bootstrap = matches!(source, RuntimeSource::ZipProvided);
         let zip_bootstrap = tokio::task::spawn_blocking(move || {
             unpack::unpack_code(bytes, &dest)?;
             if needs_zip_bootstrap {
@@ -265,11 +284,11 @@ impl Invoker {
 
         // El bootstrap + runtime_dir salen del ZIP (provided) o del bundle.
         let (bootstrap_path, runtime_dir) = match source {
-            runtime::RuntimeSource::ZipProvided => (
+            RuntimeSource::ZipProvided => (
                 zip_bootstrap.expect("provided garantiza bootstrap del ZIP"),
                 PathBuf::from(RUNTIME_DIR),
             ),
-            runtime::RuntimeSource::Bundle {
+            RuntimeSource::Bundle {
                 bootstrap,
                 runtime_dir,
             } => (bootstrap, runtime_dir),

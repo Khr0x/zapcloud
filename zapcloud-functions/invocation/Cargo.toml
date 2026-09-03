@@ -18,6 +18,9 @@ path = "src/bin/echo_bootstrap.rs"
 zc-executor-sandbox.workspace = true
 zc-persistence.workspace = true
 zc-artifact-store.workspace = true
+# Resolución runtime → bundle + integridad (§17). Graduó desde el `mod runtime`
+# local de este crate a `zc-runtime` en el paso 11.
+zc-runtime.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

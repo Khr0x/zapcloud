@@ -19,13 +19,15 @@
 //! parametriza con el enum `Family`; el resto del pipeline se reutiliza igual.
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
+
+// Modelo de integridad compartido con el daemon (§17): una sola definición.
+use zc_runtime::manifest::{sha256_file, tree_sha256, Manifest};
 
 /// Versión pinneada de Node.js (línea 22 LTS). Bumpear aquí = rebuild del bundle.
 const NODE_VERSION: &str = "22.11.0";
@@ -194,30 +196,9 @@ impl Target {
     }
 }
 
-/// Manifiesto de procedencia del bundle (§16/§17): fuente de verdad de qué se
-/// ensambló y con qué checksums. Nunca contiene artefactos de Amazon Linux.
-#[derive(Debug, Serialize, Deserialize)]
-struct Manifest {
-    runtime: String,
-    os: String,
-    arch: String,
-    /// Versión del intérprete (Node o CPython).
-    interpreter_version: String,
-    /// sha256 del tarball oficial del intérprete, verificado contra su checksum.
-    interpreter_tarball_sha256: String,
-    /// Release de python-build-standalone (solo Python; trazabilidad §17).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pbs_release: Option<String>,
-    /// Versión del RIC. `None` si el bundle no lo trae (macOS Python: dev-only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ric_version: Option<String>,
-    /// sha256 del script `bootstrap` propio.
-    bootstrap_sha256: String,
-    /// sha256 agregado del árbol del bundle (excluye este manifest).
-    tree_sha256: String,
-    /// Ruta relativa al SBOM (CycloneDX) dentro del bundle.
-    sbom: String,
-}
+// El `Manifest` de procedencia y las primitivas de integridad (`verify`,
+// `tree_sha256`, `sha256_file`) viven en `zc-runtime` (§17): fuente única que
+// escribe este bundler y lee el daemon. Ver el `use` de arriba.
 
 // --- Entradas de CLI --------------------------------------------------------
 
@@ -262,7 +243,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
 
 /// `cargo run -p xtask -- verify <bundle-dir>`
 pub fn verify_cli(dir: &str) -> Result<()> {
-    verify(Path::new(dir))?;
+    zc_runtime::manifest::verify(Path::new(dir))?;
     eprintln!("OK: bundle íntegro ({dir})");
     Ok(())
 }
@@ -967,86 +948,6 @@ fn write_ric_license(family: Family, ric: Option<&RicInstall>, bundle_dir: &Path
     }
 }
 
-// --- Verificación -----------------------------------------------------------
-
-/// Re-hashea el bundle contra su `manifest.json` (integridad, §16). El resolver
-/// del invocador (otro crate) replica esta comprobación con su propia lógica.
-fn verify(bundle_dir: &Path) -> Result<Manifest> {
-    let raw = fs::read_to_string(bundle_dir.join("manifest.json"))
-        .with_context(|| format!("leyendo manifest.json de {bundle_dir:?}"))?;
-    let manifest: Manifest = serde_json::from_str(&raw).context("manifest.json inválido")?;
-
-    let bootstrap = bundle_dir.join("bootstrap");
-    let got = sha256_file(&bootstrap)?;
-    if got != manifest.bootstrap_sha256 {
-        bail!("bootstrap alterado: esperado {}, obtenido {got}", manifest.bootstrap_sha256);
-    }
-    let tree = tree_sha256(bundle_dir)?;
-    if tree != manifest.tree_sha256 {
-        bail!("árbol del bundle alterado: esperado {}, obtenido {tree}", manifest.tree_sha256);
-    }
-    Ok(manifest)
-}
-
-// --- Utilidades -------------------------------------------------------------
-
-/// sha256 determinista del árbol: hash de `relpath\0filehash\n` sobre todos los
-/// ficheros ordenados, excluyendo `manifest.json` (que contiene este valor).
-fn tree_sha256(root: &Path) -> Result<String> {
-    let mut entries: Vec<(String, String)> = Vec::new();
-    collect_files(root, root, &mut entries)?;
-    entries.retain(|(rel, _)| rel != "manifest.json");
-    entries.sort();
-    let mut hasher = Sha256::new();
-    for (rel, hash) in entries {
-        hasher.update(rel.as_bytes());
-        hasher.update([0]);
-        hasher.update(hash.as_bytes());
-        hasher.update([b'\n']);
-    }
-    Ok(hex::encode(hasher.finalize()))
-}
-
-fn collect_files(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("leyendo dir {dir:?}"))? {
-        let path = entry?.path();
-        let meta = fs::symlink_metadata(&path)?;
-        if meta.is_dir() {
-            collect_files(root, &path, out)?;
-        } else if meta.file_type().is_symlink() {
-            // Los symlinks (p.ej. node_modules/.bin/*, bin/python3) se hashean
-            // por su destino textual: preserva el enlace sin seguirlo.
-            let target = fs::read_link(&path)?;
-            let rel = rel_str(root, &path);
-            out.push((rel, format!("symlink:{}", target.display())));
-        } else {
-            let rel = rel_str(root, &path);
-            out.push((rel, sha256_file(&path)?));
-        }
-    }
-    Ok(())
-}
-
-fn rel_str(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn sha256_file(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path).with_context(|| format!("abriendo {path:?}"))?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex::encode(hasher.finalize()))
-}
 
 fn read_pkg_version(pkg_json: &Path) -> Result<String> {
     #[derive(Deserialize)]

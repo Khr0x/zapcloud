@@ -19,3 +19,14 @@ mode = "none"
 
 [telemetry]
 prometheus = true
+
+# Distribución de runtime bundles (§17). La cache vive en `storage.runtimes`.
+[runtimes]
+# Registry OCI base de donde bajar los bundles (ghcr.io/<org>/zapcloud).
+registry = "ghcr.io/khrox20/zapcloud"
+# Runtimes a asegurar en el preflight de `serve` (si ensure_on_start = true).
+preinstall = []
+# Bajar los `preinstall` ausentes al arrancar `serve` (antes de escuchar).
+ensure_on_start = false
+# Nunca tocar la red: solo usar la cache local (`storage.runtimes`).
+offline = false

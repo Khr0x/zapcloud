@@ -10,9 +10,14 @@ Cargo.lock.orig
 .env.*
 !.env.example
 
+# Profile aislado del AWS CLI para pruebas locales (ver docs/QUICKSTART.md)
+/.aws-local/
+
 # Runtime bundles ensamblados (pesados): se generan con `cargo run -p xtask -- bundle`
 /runtimes/*
 !/runtimes/README.md
+# Lockfile de distribución (§17): versionado; los bundles siguen ignorados.
+!/runtimes/index.json
 
 # Local roadmap draft
 ROADMAP_MVP.md

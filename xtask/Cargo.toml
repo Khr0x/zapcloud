@@ -14,6 +14,9 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
+# Modelo de integridad + índice de distribución compartidos con el daemon (§17):
+# `Manifest`/`verify`/`tree_sha256` y el publish OCI viven en zc-runtime.
+zc-runtime.workspace = true
 anyhow.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
@@ -22,3 +25,6 @@ hex.workspace = true
 # reqwest del workspace trae `blocking` pero sin TLS; el bundle descarga desde
 # https://nodejs.org, así que xtask habilita rustls-tls (§16 descarga verificada).
 reqwest = { workspace = true, features = ["rustls-tls"] }
+# `publish` empuja el bundle a OCI (async, vía zc-runtime). xtask es sync, así
+# que envuelve el push en un runtime propio (§17).
+tokio = { workspace = true }
