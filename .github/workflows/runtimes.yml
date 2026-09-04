@@ -75,6 +75,30 @@ jobs:
       - name: Verificar integridad
         run: cargo run -p xtask -- verify "$BUNDLE_DIR"
 
+      # DIAGNÓSTICO (temporal): buildea una 2ª vez y diffea por-fichero para
+      # localizar qué introduce no-determinismo (§17). Escribe el resultado en el
+      # RESUMEN del run (visible arriba de todo). No falla. Quitar una vez hallado.
+      - name: Diagnóstico de reproducibilidad (doble build)
+        run: |
+          hash_tree() {
+            find "$1" -type f ! -name manifest.json ! -path '*/__pycache__/*' | sort | while read -r f; do
+              printf '%s  %s\n' "${f#"$1"/}" "$(sha256sum "$f" | cut -d' ' -f1)"
+            done
+          }
+          hash_tree "$BUNDLE_DIR" > /tmp/build1.txt
+          rm -rf "$BUNDLE_DIR"
+          cargo run -p xtask -- bundle --runtime "${{ matrix.runtime }}" --target "$TARGET"
+          hash_tree "$BUNDLE_DIR" > /tmp/build2.txt
+          {
+            echo "### Diagnóstico reproducibilidad — ${{ matrix.runtime }} ${{ matrix.arch }}"
+            echo "Ficheros que DIFIEREN entre dos builds (culpables del no-determinismo):"
+            echo '```diff'
+            if diff /tmp/build1.txt /tmp/build2.txt; then
+              echo "(sin diferencias: los dos builds son idénticos)"
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Gate de reproducibilidad. DURO solo en el PR del índice (donde el pin que
       # se propone DEBE reproducir); en el resto es aviso, para no bloquear ni un
       # cambio intencional de bundle (PR de código) ni la publicación en main
