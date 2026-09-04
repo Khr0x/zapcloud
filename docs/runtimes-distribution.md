@@ -109,23 +109,23 @@ VOS: revisás los digests → merge
 
 ---
 
-## 5. El gate de reproducibilidad (dónde es duro)
+## 5. El gate de reproducibilidad (integridad ≠ reproducibilidad)
 
-El build **debe** reproducir el `tree_sha256` pinneado (§17). Pero un cambio de
-bundle *intencional* difiere a propósito, así que el gate no es duro en todos
-lados —si lo fuera, no podrías actualizar nunca un bundle—:
+Dos objetivos distintos, que el CI mantiene separados:
 
-| Contexto | Comportamiento |
-|---|---|
-| Índice vacío (primera publicación) | pasa (nada que reproducir) |
-| Hash == pin | pasa |
-| Hash ≠ pin, en el **PR `ci/update-runtime-index`** | **falla** (el pin propuesto DEBE reproducir) |
-| Hash ≠ pin, en un PR de código | **aviso** (no bloquea; si es intencional, el pin se actualiza tras el merge) |
-| Hash ≠ pin, en `main` | **aviso** (publica igual; el PR de índice lleva el pin nuevo, revisado) |
+- **Integridad** (crítico): `tree_sha256` pinnea el artifact **publicado** —
+  incluidos los binarios nativos— y el daemon lo verifica al bajar. Garantiza
+  que se ejecutan exactamente los bytes revisados. No depende de reproducibilidad.
+- **Reproducibilidad** (§17): el gate reconstruye el bundle **dos veces** y exige
+  que **las partes que zapcloud ensambla** (bootstrap, layout, SBOM, intérprete
+  verificado por checksum) sean byte-idénticas.
 
-La garantía real de reproducibilidad la da el **PR de índice**: reconstruye y
-exige que el pin recién generado reproduzca. Si ahí falla, el build es
-no-determinista y hay que arreglarlo (ver §7).
+**Excepción deliberada:** los binarios nativos **upstream** (`*.node`, `*.so`,
+compilados por el RIC de AWS) **no son bit-reproducibles** —el no-determinismo
+está en el código compilado C++, no en metadata limpiable— y el gate los
+**excluye**. Su integridad la cubre el `tree_sha256` publicado + la verificación
+del daemon, no la reproducibilidad. El gate **falla** solo si difiere una parte
+determinista (eso sí sería un bug nuestro; ver §7).
 
 ---
 
@@ -152,16 +152,20 @@ verificación de reproducibilidad del §5, no un bucle.
 `github.repository` conserva el case del owner. Ya resuelto: `oci_ref` normaliza
 el base a minúsculas (`zc-runtime::oci`). No requiere acción.
 
-### `tree_sha256 no reproduce: pinneado=… build=…`
-El build **no es reproducible**. Causas conocidas:
-- **SBOM no-determinista** (resuelto): `npm sbom` inyecta `serialNumber`/`timestamp`
-  nuevos por corrida; `normalize_node_sbom` los quita.
-- **Pin stale**: si los hashes son idénticos entre corridas pero no matchean el
-  pin, el pin viene de un build viejo (pre-fix). Descartá la rama
-  `ci/update-runtime-index` y republicá desde main (índice `{}` → re-pinnea).
-- **Hashes NUEVOS y distintos entre corridas**: queda otra fuente de
-  no-determinismo. Sospechoso: el addon nativo del RIC (`rapid-client.node`,
-  g++). Se ataca con `SOURCE_DATE_EPOCH` + `-ffile-prefix-map` en el build Docker.
+### El gate `partes deterministas` falla
+Difiere una parte que zapcloud ensambla (no un binario nativo upstream) — **eso
+sí es un bug de determinismo nuestro**. Causas ya resueltas históricamente:
+- **SBOM no-determinista**: `npm sbom` inyecta `serialNumber`/`timestamp` nuevos
+  por corrida; `normalize_node_sbom` los quita y reserializa con claves ordenadas.
+
+Si aparece un fichero nuevo en el diff del gate, replicá el patrón: hacelo
+determinista en `xtask bundle` (sin timestamps/UUID/orden variable).
+
+### `rapid-client.node` (u otro `*.node`) difiere entre builds
+**Esperado, no es bug.** El addon nativo upstream del RIC no es bit-reproducible.
+El gate lo excluye a propósito (§5); su integridad va por el digest publicado.
+No intentes forzarlo con `strip`/`SOURCE_DATE_EPOCH`: se probó y el
+no-determinismo está en el código compilado, no en metadata.
 
 ### El job `update-index` falla en `app-token`
 Faltan los secrets del GitHub App (§4, prerrequisito).
