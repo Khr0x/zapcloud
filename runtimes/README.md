@@ -36,8 +36,13 @@ zapcloud runtimes install --runtime nodejs22.x   # o --config <path>
 guarda `tree_sha256` + `oci_ref` + `oci_digest`. Es a la vez la fuente del pull
 (content-addressed, §15) y el **gate de reproducibilidad** de CI
 (`.github/workflows/runtimes.yml`): el build debe reproducir el `tree_sha256`
-pinneado o el job falla. La instalación es cache-only en el hot path del invoke;
+pinneado. La instalación es cache-only en el hot path del invoke;
 `ensure` (install/preflight) es lo único que toca la red.
+
+**Flujo completo de CI, playbook operativo y troubleshooting:**
+[`../docs/runtimes-distribution.md`](../docs/runtimes-distribution.md). En
+resumen: `index.json` es un lockfile generado (no se edita a mano); CI publica a
+ghcr y abre un PR para actualizarlo, que se revisa antes de mergear.
 
 **Solo Linux se distribuye por OCI** (carril de referencia). Los bundles darwin
 son dev-only: se ensamblan localmente con `xtask bundle` y nunca se publican.

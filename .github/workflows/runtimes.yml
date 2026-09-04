@@ -3,8 +3,11 @@
 # - Ensambla los bundles Linux (carril de referencia, RIC real) en contenedor
 #   del target vía Docker. Solo x86_64: arm64 está fuera de scope hasta que haya
 #   un host Linux ARM objetivo (evita el compile del RIC nativo bajo QEMU).
-# - Gate de reproducibilidad: si `runtimes/index.json` ya pinnea un tree_sha256
-#   para ese runtime×plataforma, el build DEBE reproducirlo (falla si difiere).
+# - Gate de reproducibilidad: el build DEBE reproducir el `tree_sha256` pinneado.
+#   Es DURO solo donde importa —el PR del índice `ci/update-runtime-index`, que
+#   verifica que el pin recién generado reproduce—; en otros PRs es un aviso
+#   (un cambio de bundle intencional difiere a propósito) y en `main` no bloquea
+#   la publicación (el pin se actualiza vía el PR de índice, revisado).
 # - En `main`: publica cada bundle en ghcr.io y abre/actualiza un PR con el
 #   `runtimes/index.json` regenerado (lockfile §17). El pin del runtime se revisa
 #   antes de mergear; main nunca recibe un commit del índice sin review.
@@ -28,6 +31,12 @@ on:
 permissions:
   contents: read
   packages: write
+
+# Serializa por ref: dos merges seguidos a main no se pisan en el push a ghcr ni
+# en la rama del índice. No cancela en curso (una publicación a medias es peor).
+concurrency:
+  group: runtimes-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   bundle:
@@ -63,16 +72,27 @@ jobs:
       - name: Verificar integridad
         run: cargo run -p xtask -- verify "$BUNDLE_DIR"
 
+      # Gate de reproducibilidad. DURO solo en el PR del índice (donde el pin que
+      # se propone DEBE reproducir); en el resto es aviso, para no bloquear ni un
+      # cambio intencional de bundle (PR de código) ni la publicación en main
+      # —ahí el pin viejo todavía no se actualizó; lo hará el PR de índice—.
       - name: Gate de reproducibilidad
         run: |
           PINNED=$(jq -r --arg r "${{ matrix.runtime }}" --arg p "$PLATFORM" \
             '.[$r][$p].tree_sha256 // empty' runtimes/index.json)
           BUILT=$(jq -r '.tree_sha256' "$BUNDLE_DIR/manifest.json")
-          if [ -n "$PINNED" ] && [ "$PINNED" != "$BUILT" ]; then
-            echo "::error::tree_sha256 no reproduce: pinneado=$PINNED build=$BUILT"
+          if [ -z "$PINNED" ]; then
+            echo "primera publicación: nada que reproducir (build=$BUILT)"; exit 0
+          fi
+          if [ "$PINNED" = "$BUILT" ]; then
+            echo "reproducibilidad OK ($BUILT)"; exit 0
+          fi
+          if [ "${{ github.head_ref }}" = "ci/update-runtime-index" ]; then
+            echo "::error::el bundle no reproduce el pin propuesto: pin=$PINNED build=$BUILT"
             exit 1
           fi
-          echo "reproducibilidad OK (pinneado='${PINNED:-<primera publicación>}' build=$BUILT)"
+          echo "::warning::el bundle difiere del pin actual (pin=$PINNED build=$BUILT). \
+Si es intencional, el PR de índice actualizará el pin tras el merge; si no, revisá qué cambió."
 
       - name: Publicar en ghcr.io + actualizar índice
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
