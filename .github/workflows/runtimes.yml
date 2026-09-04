@@ -91,8 +91,7 @@ jobs:
             echo "::error::el bundle no reproduce el pin propuesto: pin=$PINNED build=$BUILT"
             exit 1
           fi
-          echo "::warning::el bundle difiere del pin actual (pin=$PINNED build=$BUILT). \
-Si es intencional, el PR de índice actualizará el pin tras el merge; si no, revisá qué cambió."
+          echo "::warning::el bundle difiere del pin actual (pin=$PINNED build=$BUILT). Si es intencional, el PR de índice actualizará el pin tras el merge; si no, revisá qué cambió."
 
       - name: Publicar en ghcr.io + actualizar índice
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
