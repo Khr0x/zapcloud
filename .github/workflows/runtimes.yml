@@ -106,13 +106,25 @@ jobs:
           echo "OK: partes deterministas reproducen byte a byte." \
                "Binarios nativos upstream (*.node) no se exigen bit-idénticos (integridad vía digest publicado)."
 
+      # Reintento: la subida del blob a ghcr sufre timeouts de red transitorios
+      # (os error 110) en runners de Actions. El push OCI es idempotente por
+      # digest (los blobs ya subidos se saltan), así que reintentar es seguro.
       - name: Publicar en ghcr.io + actualizar índice
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ZAPCLOUD_OCI_REGISTRY: ghcr.io/${{ github.repository }}
-        run: cargo run -p xtask -- publish --runtime "${{ matrix.runtime }}" --target "$TARGET"
+        run: |
+          for i in 1 2 3; do
+            if cargo run -p xtask -- publish --runtime "${{ matrix.runtime }}" --target "$TARGET"; then
+              exit 0
+            fi
+            echo "::warning::publish falló (intento $i/3); reintentando en $((i*15))s…"
+            sleep $((i*15))
+          done
+          echo "::error::publish a ghcr falló tras 3 intentos"
+          exit 1
 
       - name: Subir SBOM
         uses: actions/upload-artifact@v4
