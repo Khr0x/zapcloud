@@ -777,15 +777,25 @@ fn install_ric_node_docker(proj: &Path, target: Target) -> Result<()> {
     // hace en `/build` (fs nativo del contenedor), NO en el volumen montado
     // (virtiofs): sobre el montaje, el skew de timestamps dispara `autoreconf` y
     // regenera un `libtool` roto. El resultado se copia de vuelta a `/work`.
+    //
+    // Reproducibilidad del addon nativo `rapid-client.node` (§17): sin esto,
+    // `tree_sha256` no reproduce build a build. Tres fuentes de no-determinismo:
+    //   - SOURCE_DATE_EPOCH fijo → GCC congela `__DATE__`/`__TIME__`.
+    //   - `strip` → quita símbolos/debug (varían con rutas/orden del build).
+    //   - `objcopy --remove-section=.note.gnu.build-id` → quita el build-id.
+    // binutils (strip/objcopy) ya viene con g++, pero lo pedimos explícito.
     let script = "set -e; \
         export DEBIAN_FRONTEND=noninteractive; \
+        export SOURCE_DATE_EPOCH=1704067200; \
         apt-get update >/dev/null; \
         apt-get install -y --no-install-recommends \
-          cmake autoconf automake libtool make g++ python3 xz-utils ca-certificates >/dev/null; \
+          cmake autoconf automake libtool make g++ python3 xz-utils ca-certificates binutils >/dev/null; \
         mkdir -p /build && cp /work/package.json /build/; \
         cp /work/package-lock.json /build/ 2>/dev/null || true; \
         cd /build; \
         npm install --no-audit --no-fund; \
+        find /build/node_modules -name '*.node' -exec strip {} + ; \
+        find /build/node_modules -name '*.node' -exec objcopy --remove-section=.note.gnu.build-id {} + ; \
         npm sbom --sbom-format cyclonedx > /work/sbom.cdx.json 2>/dev/null || true; \
         cp -a /build/node_modules /work/node_modules; \
         cp -f /build/package-lock.json /work/ 2>/dev/null || true";
