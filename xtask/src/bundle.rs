@@ -308,8 +308,8 @@ fn assemble(family: Family, target: Target, out: &Path) -> Result<()> {
         Family::Node => ric
             .as_ref()
             .and_then(|r| r.sbom_cyclonedx.as_deref())
-            .unwrap_or("{}\n")
-            .to_string(),
+            .map(normalize_node_sbom)
+            .unwrap_or_else(|| "{}\n".to_string()),
         Family::Python => {
             let ric_dir = ric.as_ref().map(|r| bundle_dir.join(r.dest_rel));
             python_sbom(ric_dir.as_deref(), family.interpreter_version())?
@@ -841,6 +841,28 @@ fn dist_info_version(target_dir: &Path, package: &str) -> Result<String> {
 /// SBOM CycloneDX 1.5 determinista para bundles Python.
 ///
 /// Se construye desde lo que realmente queda en el bundle: el intérprete CPython
+/// Normaliza el SBOM CycloneDX de `npm sbom` para que sea **determinista** (§17),
+/// como el de Python. `npm sbom` inserta en cada corrida un `serialNumber` (UUID
+/// aleatorio) y un `metadata.timestamp` (hora del build); ambos entran en
+/// `tree_sha256` y romperían el gate de reproducibilidad. Se quitan y se
+/// reserializa vía `serde_json::Value`, que (sin `preserve_order`) ordena las
+/// claves — eliminando también cualquier no-determinismo de orden. Best-effort:
+/// si el JSON no parsea, se devuelve tal cual.
+fn normalize_node_sbom(raw: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return raw.to_string();
+    };
+    if let Some(obj) = v.as_object_mut() {
+        obj.remove("serialNumber");
+        if let Some(meta) = obj.get_mut("metadata").and_then(|m| m.as_object_mut()) {
+            meta.remove("timestamp");
+        }
+    }
+    serde_json::to_string_pretty(&v)
+        .map(|s| s + "\n")
+        .unwrap_or_else(|_| raw.to_string())
+}
+
 /// (PSF) más un componente por cada `.dist-info` del RIC. Determinista a propósito
 /// (§16): sin `serialNumber` ni `timestamp` aleatorios, para que `tree_sha256` sea
 /// reproducible build a build. `ric_dir` es `None` en el bundle darwin (sin RIC):
@@ -1026,6 +1048,24 @@ mod tests {
         assert_eq!(Family::parse("nodejs22.x").unwrap(), Family::Node);
         assert_eq!(Family::parse("python3.13").unwrap(), Family::Python);
         assert!(Family::parse("ruby3.2").is_err());
+    }
+
+    #[test]
+    fn normalize_node_sbom_es_determinista() {
+        // Mismo SBOM, distinto serialNumber/timestamp (lo que hace npm en cada
+        // corrida) → misma salida normalizada, y sin esos campos.
+        let a = r#"{"serialNumber":"urn:uuid:aaaa","metadata":{"timestamp":"2026-01-01T00:00:00Z","tools":[]},"components":[]}"#;
+        let b = r#"{"serialNumber":"urn:uuid:bbbb","metadata":{"timestamp":"2026-09-03T12:00:00Z","tools":[]},"components":[]}"#;
+        let na = normalize_node_sbom(a);
+        assert_eq!(na, normalize_node_sbom(b), "debe ser estable build a build");
+        assert!(!na.contains("serialNumber"), "serialNumber debe quitarse");
+        assert!(!na.contains("timestamp"), "timestamp debe quitarse");
+        assert!(na.contains("components"), "el resto del SBOM se conserva");
+    }
+
+    #[test]
+    fn normalize_node_sbom_json_invalido_pasa_tal_cual() {
+        assert_eq!(normalize_node_sbom("no json"), "no json");
     }
 
     #[test]
