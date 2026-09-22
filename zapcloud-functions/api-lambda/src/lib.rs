@@ -273,7 +273,7 @@ async fn invoke(
     if headers.contains_key("x-amz-client-context") {
         return Err(ApiError::invalid("ClientContext no está soportado en v0.1"));
     }
-    require_json_if_present(&headers)?;
+    require_invoke_content_type(&headers)?;
     let payload = to_bytes(request.into_body(), INVOKE_BODY_LIMIT)
         .await
         .map_err(|_| ApiError::new(AwsErrorCode::RequestTooLarge, "payload mayor de 6 MB"))?;
