@@ -13,9 +13,9 @@
       "interpreter_version": "3.13.15",
       "ric_version": "4.0.2",
       "pbs_release": "20260825",
-      "tree_sha256": "7567962a9e6ae33e187f8c83d7f2d35173431cad5e7a96f244c2b7d5a969cbb4",
+      "tree_sha256": "9ef5dacf326f4472e0c39bfcf2558e9dc106b5f8b2a15011f3ed0bf374eda7ea",
       "oci_ref": "ghcr.io/khr0x/zapcloud/runtime-python:3.13-amd64",
-      "oci_digest": "sha256:286663ad0f8909e017568966520921c1bc409a77019f8d579e1c41dfaa847f08"
+      "oci_digest": "sha256:5054e7c04021bc422c33669c40033d2fc424bab8d9c15635acd9a67877646c09"
     }
   }
 }
