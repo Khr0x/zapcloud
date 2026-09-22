@@ -26,18 +26,18 @@ artifacts** en `ghcr.io/<org>/zapcloud` (tag `runtime-nodejs:22-<arch>` /
 
 ```
 # publica el bundle ya ensamblado + pinnea la entrada en runtimes/index.json
-cargo run -p xtask -- publish --runtime nodejs22.x --target linux-arm64
+cargo run -p xtask -- publish --runtime nodejs22.x --target linux-x86_64
 
 # en un nodo desplegado: baja y verifica los bundles ausentes
 zapcloud runtimes install --runtime nodejs22.x   # o --config <path>
 ```
 
 `runtimes/index.json` es el **lockfile pinneado**: para cada `runtime × plataforma`
-guarda `tree_sha256` + `oci_ref` + `oci_digest`. Es a la vez la fuente del pull
-(content-addressed, §15) y el **gate de reproducibilidad** de CI
-(`.github/workflows/runtimes.yml`): el build debe reproducir el `tree_sha256`
-pinneado. La instalación es cache-only en el hot path del invoke;
-`ensure` (install/preflight) es lo único que toca la red.
+guarda `tree_sha256` + `oci_ref` + `oci_digest`. Es la fuente del pull
+(content-addressed, §15). La instalación es cache-only en el hot path del invoke;
+`ensure` (install/preflight) es lo único que toca la red. El gate de CI actual
+comprueba repetibilidad entre dos builds de la misma ejecución, pero aún no compara
+automáticamente contra el pin publicado; esa corrección pertenece a v0.1.2.
 
 **Flujo completo de CI, playbook operativo y troubleshooting:**
 [`../docs/runtimes-distribution.md`](../docs/runtimes-distribution.md). En
@@ -46,6 +46,10 @@ ghcr y abre un PR para actualizarlo, que se revisa antes de mergear.
 
 **Solo Linux se distribuye por OCI** (carril de referencia). Los bundles darwin
 son dev-only: se ensamblan localmente con `xtask bundle` y nunca se publican.
+
+> **Limitaciones actuales:** el índice publicado solo contiene Linux/amd64; la
+> reparación de bundles corruptos, desired-state/rollback y el índice inicial de
+> una instalación desde binario siguen pendientes de v0.1.2.
 
 ## Layout de un bundle (`nodejs22-<os>-<arch>/`)
 

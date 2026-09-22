@@ -52,7 +52,8 @@ pub fn save(path: &Path, index: &Index) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::write(path, format!("{json}\n")).with_context(|| format!("escribiendo índice {path:?}"))
+    std::fs::write(path, format!("{json}\n"))
+        .with_context(|| format!("escribiendo índice {path:?}"))
 }
 
 /// Busca la entrada de `runtime` en `platform` (p.ej. `"linux-arm64"`).
@@ -91,7 +92,9 @@ mod tests {
         save(&path, &index).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(
-            lookup(&loaded, "nodejs22.x", "linux-arm64").unwrap().tree_sha256,
+            lookup(&loaded, "nodejs22.x", "linux-arm64")
+                .unwrap()
+                .tree_sha256,
             "aaa"
         );
         assert!(lookup(&loaded, "nodejs22.x", "linux-x86_64").is_none());

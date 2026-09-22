@@ -19,5 +19,4 @@ Cargo.lock.orig
 # Lockfile de distribución (§17): versionado; los bundles siguen ignorados.
 !/runtimes/index.json
 
-# Local roadmap draft
-ROADMAP_MVP.md
+# ROADMAP_MVP.md es el roadmap versionable del servicio Functions.

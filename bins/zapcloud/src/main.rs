@@ -98,9 +98,10 @@ async fn run_runtimes(args: Vec<String>) -> Result<()> {
     }
 
     for r in targets {
-        let outcome = zc_runtime::ensure(&runtimes_root, &index, &r, &auth, config.runtimes.offline)
-            .await
-            .with_context(|| format!("instalando runtime '{r}'"))?;
+        let outcome =
+            zc_runtime::ensure(&runtimes_root, &index, &r, &auth, config.runtimes.offline)
+                .await
+                .with_context(|| format!("instalando runtime '{r}'"))?;
         tracing::info!(runtime = %r, ?outcome, "runtime listo");
     }
     Ok(())

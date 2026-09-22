@@ -48,8 +48,8 @@ pub async fn ensure(
              referencia). En dev macOS ensámblalos con `cargo run -p xtask -- bundle`"
         )));
     }
-    let dir_name = resolve::bundle_dir_name(runtime, os, arch)
-        .expect("is_bundle_runtime ⇒ dir_name");
+    let dir_name =
+        resolve::bundle_dir_name(runtime, os, arch).expect("is_bundle_runtime ⇒ dir_name");
     let platform = index::platform(os, arch);
     let dest = runtimes_root.join(&dir_name);
 

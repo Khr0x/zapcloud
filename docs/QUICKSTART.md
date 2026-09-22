@@ -4,9 +4,11 @@ Guía práctica para levantar el daemon y ejecutar funciones end-to-end, 100% lo
 con el **AWS CLI real** apuntando a tu `localhost`. Sin Docker (salvo para ensamblar
 bundles Linux), sin nada en la nube: solo SQLite + filesystem (§5.2).
 
-Estado cubierto: **v0.1.1** (pasos 1–10). Runtimes disponibles: `provided.al2023`,
-`nodejs22.x`, `python3.13`. Invocación **síncrona** (`RequestResponse`) en process/T1
-(**sin aislamiento** — no ejecutes código no confiable).
+Estado cubierto: **v0.1 + base v0.1.1** (pasos 1–10). La estabilización obligatoria
+**v0.1.2** está pendiente. Runtimes aceptados por el control plane: `provided.al2023`,
+`nodejs22.x`, `python3.13`; solo `provided.al2023` funciona sin bundle. Invocación
+**síncrona** (`RequestResponse`) en process/T1 de desarrollo (**sin aislamiento ni límites
+efectivos** — no ejecutes código no confiable).
 
 ---
 
@@ -14,6 +16,7 @@ Estado cubierto: **v0.1.1** (pasos 1–10). Runtimes disponibles: `provided.al20
 
 - **Rust** (toolchain del repo) para compilar el daemon.
 - **AWS CLI v2** (o cualquier SDK de AWS) como cliente.
+- `curl`, `zip`, `grep`, `awk`, `mktemp` y un shell POSIX para los ejemplos.
 - **Docker** solo si quieres ensamblar los bundles Linux con RIC real. Para probar en
   macOS no hace falta: los bundles `darwin-arm64` usan `dev-runtime` (menor fidelidad).
 
@@ -25,7 +28,8 @@ Estado cubierto: **v0.1.1** (pasos 1–10). Runtimes disponibles: `provided.al20
 ## 2. Arrancar el daemon
 
 Usa el `zapcloud.toml.example` como base (escucha en `127.0.0.1:9000`, región `local-1`,
-auth `none`):
+auth `none`). **No cambies esa escucha a una interfaz pública mientras `auth=none` siga
+habilitado**; process mode ejecuta ZIPs con el usuario, filesystem, red y entorno del daemon.
 
 ```bash
 cp zapcloud.toml.example zapcloud.toml
@@ -76,10 +80,12 @@ sin repetir `--endpoint-url` en cada comando.
 
 ---
 
-## 4. Ejemplo A — `provided.al2023` (sin bundle, fidelidad total)
+## 4. Ejemplo A — `provided.al2023` (sin bundle, protocolo parcial)
 
 El runtime `provided.*` implementa el bucle del Runtime API en tu propio `bootstrap`.
-Este ejemplo en shell hace **eco del evento**.
+Este ejemplo en shell hace **eco del evento**. Es una prueba local del flujo, no una
+certificación de fidelidad total: el executor aún no reproduce todos los headers/deadlines
+del Runtime API de AWS ni aporta un userspace AL2023.
 
 ```bash
 mkdir -p demo-provided && cd demo-provided
@@ -119,6 +125,13 @@ Esperado: `out.json` con `{"runtime":"provided.al2023","echo":{"hello":"zap"}}`.
 ## 5. Ejemplo B — `nodejs22.x`
 
 Handler `index.handler` → `index.js` en la raíz del ZIP.
+
+Antes de crear la función, ensambla el bundle del host:
+
+```bash
+cargo run -p xtask -- bundle --runtime nodejs22.x --target darwin-arm64
+# En Linux con el RIC real: --target linux-x86_64 (requiere Docker)
+```
 
 ```bash
 mkdir -p demo-node && cd demo-node
@@ -221,6 +234,9 @@ curl -s http://127.0.0.1:9000/metrics
 ## 9. Qué NO funciona todavía (por roadmap)
 
 - **Aislamiento**: process/T1, el código **no está sandboxeado** (v0.2).
+- **Límites**: `Timeout` y `MemorySize` se aceptan en metadata, pero aún no se aplican al proceso.
+- **Arquitectura**: la arquitectura declarada todavía no selecciona un worker distinto; usa la del host.
+- **Seguridad remota**: `auth=none` solo es apropiado para loopback/laboratorio; no hay frontera contra secretos del daemon.
 - **Invoke async** (`Event`, 202): solo síncrono `RequestResponse` (v0.3).
 - **Variables de entorno de usuario** (`Environment.Variables`): aún no se inyectan (paso 13).
 - **`GetFunctionConfiguration` / `UpdateFunctionConfiguration`** (paso 12).
@@ -234,6 +250,7 @@ curl -s http://127.0.0.1:9000/metrics
 |---|---|
 | `RuntimeUnavailable ... bundle no está instalado` | Falta el bundle del runtime → `cargo run -p xtask -- bundle --runtime <nodejs22.x\|python3.13>` |
 | `InvalidParameterValue` en runtime | Runtime no soportado en v0.1.1 (solo `provided.al2023`, `nodejs22.x`, `python3.13`) |
+| Node/Python funciona en macOS pero falla en Linux | macOS usa `dev-runtime`; el RIC Linux real aún requiere validación de v0.1.2 |
 | `invoke` devuelve base64 raro | Falta `--cli-binary-format raw-in-base64-out` en el `invoke` |
 | Node/Python en macOS con salida "dev" | Esperado: darwin usa `dev-runtime` (menor fidelidad). El RIC real es solo Linux |
 | No conecta al endpoint | El daemon no está corriendo, o el `endpoint_url` del profile no apunta a `http://127.0.0.1:9000` |

@@ -50,7 +50,12 @@ zapcloud runtimes install --runtime nodejs22.x
   la red**. Si el bundle falta o su integridad no verifica, el cold start falla.
 - **`ensure`** (install / preflight de `serve`): lo único que baja de la red.
   Descarga pinneada por `oci_digest`, verifica `tree_sha256`, instala atómico
-  (staging + rename).
+  (staging + rename). La comparación con el estado deseado, reparación de un
+  destino corrupto y rollback todavía son trabajo del milestone v0.1.2.
+
+> **Estado actual:** `runtimes/index.json` ya está poblado para Linux/amd64. Una
+> instalación desde un binario con cache vacía aún necesita recibir ese índice como
+> recurso versionado; `ensure` no puede descubrir el runtime sin él.
 
 ---
 
@@ -85,15 +90,15 @@ checks). Configurá:
 
 Sin esto, el job `update-index` falla en el paso `app-token`.
 
-### Bootstrap (primera vez / índice en `{}`)
+### Bootstrap (histórico; índice actualmente poblado)
 
 ```
 Actions → runtimes → Run workflow (main)   [o: gh workflow run runtimes.yml --ref main]
-   ↓  build + verify + gate (PINNED vacío → "primera publicación", pasa)
+   ↓  build + verify + gate
    ↓  publica bundles a ghcr.io
    ↓  abre PR "ci/update-runtime-index" con los pins reales
 VOS: revisás los digests → merge
-   → runtimes/index.json queda poblado. FIN.
+   → se revisan los pins del índice. FIN.
 ```
 
 ### Recurrente (cada cambio de runtime: `xtask/**` o `zapcloud-functions/runtime/**`)
@@ -126,6 +131,11 @@ está en el código compilado C++, no en metadata limpiable— y el gate los
 **excluye**. Su integridad la cubre el `tree_sha256` publicado + la verificación
 del daemon, no la reproducibilidad. El gate **falla** solo si difiere una parte
 determinista (eso sí sería un bug nuestro; ver §7).
+
+**Estado del gate:** el workflow actual compara dos builds de la misma ejecución,
+pero todavía no compara automáticamente el resultado contra el `tree_sha256`
+publicado en `runtimes/index.json`. Hasta v0.1.2 debe llamarse *repeatability smoke
+test*, no gate completo de reproducibilidad del pin.
 
 ---
 
@@ -176,8 +186,20 @@ Es basura generada por un pipeline anterior. **Borrala** (`git push origin
 
 ---
 
-## 8. Rollback
+## 8. Rollback (objetivo de v0.1.2)
 
-Un bundle malo se revierte revirtiendo el commit del índice (`git revert`) o
-mergeando un PR que restaure el `index.json` anterior. Los hosts vuelven a
-instalar el `oci_digest` previo. No se re-taggea en el registry.
+El procedimiento previsto es revertir el commit del índice (`git revert`) o
+mergear un PR que restaure el `index.json` anterior. Para que esto sea efectivo,
+v0.1.2 debe hacer que `ensure` compare el pin deseado y reemplace atómicamente el
+bundle local, incluso si existe un destino corrupto. Hoy cambiar el índice por sí
+solo no fuerza la reinstalación. No se re-taggea en el registry.
+
+## 9. Limitaciones conocidas hasta v0.1.2
+
+- La matriz de CI publica índices completos desde jobs paralelos; el merge puede
+  sobrescribir una actualización con un pin antiguo.
+- Solo se distribuye Linux/amd64. `darwin-*` es dev-only y Linux/arm64 aún no tiene
+  una entrada publicada.
+- `runtimes.registry` del ejemplo es informativo; actualmente la autoridad efectiva
+  es `oci_ref` del índice. Debe eliminarse o hacerse funcional antes de declararlo
+  una opción de configuración.

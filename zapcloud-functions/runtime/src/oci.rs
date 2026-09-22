@@ -84,8 +84,7 @@ fn pack_bundle(bundle_dir: &Path) -> Result<Vec<u8>> {
 
 /// Desempaqueta la capa (`tar.gz`) en `dest_dir`, preservando permisos.
 fn unpack_layer(data: &[u8], dest_dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(dest_dir)
-        .with_context(|| format!("creando {dest_dir:?}"))?;
+    std::fs::create_dir_all(dest_dir).with_context(|| format!("creando {dest_dir:?}"))?;
     let dec = GzDecoder::new(data);
     let mut ar = tar::Archive::new(dec);
     ar.set_preserve_permissions(true);
@@ -206,10 +205,8 @@ mod tests {
     #[ignore = "requiere un registry OCI local (ver doc del test)"]
     async fn oci_push_pull_roundtrip_real() {
         use crate::manifest::tree_sha256;
-        let Ok(base) = std::env::var("ZAPCLOUD_OCI_TEST_REF") else {
-            eprintln!("SKIP: ZAPCLOUD_OCI_TEST_REF no está");
-            return;
-        };
+        let base = std::env::var("ZAPCLOUD_OCI_TEST_REF")
+            .expect("ZAPCLOUD_OCI_TEST_REF es obligatorio al ejecutar este test con --ignored");
         let reference = oci_ref(&base, "nodejs22.x", "arm64").unwrap();
 
         // Bundle mínimo (fichero + symlink).
@@ -253,7 +250,10 @@ mod tests {
         unpack_layer(&packed, &dst).unwrap();
 
         let after = tree_sha256(&dst).unwrap();
-        assert_eq!(before, after, "el árbol debe sobrevivir al round-trip tar.gz");
+        assert_eq!(
+            before, after,
+            "el árbol debe sobrevivir al round-trip tar.gz"
+        );
         let _ = std::fs::remove_dir_all(src);
         let _ = std::fs::remove_dir_all(dst);
     }

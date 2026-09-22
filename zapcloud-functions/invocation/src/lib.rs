@@ -83,8 +83,9 @@ impl From<RuntimeError> for InvocationError {
     fn from(err: RuntimeError) -> Self {
         match err {
             RuntimeError::Unsupported(msg) => InvocationError::Unsupported(msg),
-            RuntimeError::Unavailable(msg)
-            | RuntimeError::Integrity(msg) => InvocationError::RuntimeUnavailable(msg),
+            RuntimeError::Unavailable(msg) | RuntimeError::Integrity(msg) => {
+                InvocationError::RuntimeUnavailable(msg)
+            }
             RuntimeError::Other(err) => InvocationError::RuntimeUnavailable(err.to_string()),
         }
     }

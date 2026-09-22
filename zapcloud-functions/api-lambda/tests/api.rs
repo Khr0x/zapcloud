@@ -45,7 +45,13 @@ async fn setup_with_auth(auth: AuthMode) -> (axum::Router, TempDir) {
         .await
         .expect("store");
     let manager = FunctionManager::new(db.clone(), store.clone());
-    let invoker = Invoker::new(db, store, temp.0.join("work"), temp.0.join("runtimes"), "local-1");
+    let invoker = Invoker::new(
+        db,
+        store,
+        temp.0.join("work"),
+        temp.0.join("runtimes"),
+        "local-1",
+    );
     (router(manager, invoker, LambdaApiConfig::local(auth)), temp)
 }
 
