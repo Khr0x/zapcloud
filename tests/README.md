@@ -2,13 +2,12 @@
 
 Pruebas a nivel de repo, no unitarias de crate.
 
-Estado actual: este directorio contiene esta guía y helpers compartidos en `support/`.
-Las suites descritas abajo son entregables del roadmap, no pruebas que ya se ejecuten
-en un checkout limpio.
+Estado actual: `support/` contiene helpers compartidos y `golden/` la matriz local
+CLI/SDK del contrato documentado. La comparación contra una captura AWS sigue pendiente.
 
-- `golden/` — **golden compatibility tests** (§70): paridad medida contra AWS
-  real/SDKs y AWS RIE. Hito obligatorio de v0.1.2; no marcar compatibilidad como
-  completa mientras no exista una ejecución reproducible.
+- [`golden/`](golden/README.md) — 22 casos compartidos × 3 clientes con reporte de
+  procedencia; CI ejecuta la base local con SigV4. Referencia AWS real aún no capturada: no
+  marcar paridad como completa. Incluye comandos de captura manual y comparación (§70).
 - `isolation/` — **isolation escape tests** (§32, §82). Son **criterio de
   release**: `tenant_trust=semi-trusted` solo se habilita desde v0.2 y solo si
   esta suite pasa. El server no finge aislamiento (§78).
@@ -50,7 +49,8 @@ ZAPCLOUD_OCI_TEST_REF=localhost:5000/zapcloud \
 
 Los logs y el resumen de cada ejecución en Actions son la evidencia de ese commit.
 Añadir este workflow no cierra v0.1.2: siguen pendientes los demás gates del roadmap,
-incluida la evidencia verde de los E2E con RIC real y los golden tests.
+incluida la captura AWS y comparación de los golden tests. Los E2E con RIC real ya tienen
+[evidencia verde Linux x86_64](https://github.com/Khr0x/zapcloud/actions/runs/35754499341).
 
 ## Contrato Runtime API y timeout
 
@@ -59,7 +59,7 @@ Evidencia local: [Linux ARM64 con ambos RIC reales](evidence/runtime-api-linux-a
 El workflow [runtimes](../.github/workflows/runtimes.yml) ensambla bundles Linux x86_64,
 verifica integridad/reproducibilidad y ejecuta el E2E del RIC correspondiente **antes de
 publicar**. Los PRs que tocan código, dependencias o pruebas también disparan este gate.
-Un addon nativo ausente hace fallar la prueba; no se acredita el cliente dev como RIC.
+Un addon nativo ausente o incompatible con el intérprete hace fallar la prueba; no se acredita el cliente dev como RIC.
 
 Para reproducir en Linux con Rust 1.96.1 y Docker disponibles:
 

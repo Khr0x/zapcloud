@@ -154,7 +154,7 @@ Evidencia: [CI verde de PR #15](https://github.com/Khr0x/zapcloud/actions/runs/3
 Process/T1 sigue sin aislamiento de
 usuario/filesystem/red y no contiene procesos que abandonen deliberadamente su grupo.
 
-**Runtime API (implementado; evidencia CI pendiente):** `/next` entrega un request ID
+**Runtime API (subset implementado con evidencia CI):** `/next` entrega un request ID
 UUID por invocación, `Lambda-Runtime-Deadline-Ms` (epoch ms) y
 `Lambda-Runtime-Invoked-Function-Arn` construido con la región, cuenta y nombre reales.
 El evento se entrega como `application/json`, necesario para que el RIC Python lo deserialice.
@@ -173,7 +173,25 @@ X-Ray/ClientContext/Cognito e Init-error/retry aún no están cubiertos, y `Memo
 sigue siendo metadata sin enforcement. La matriz golden sigue pendiente.
 
 Validación local: [Linux ARM64 con RIC reales, 2026-09-22](tests/evidence/runtime-api-linux-arm64.md).
-Pendiente enlazar la ejecución de Actions de esta implementación en Linux x86_64.
+Evidencia Linux x86_64: [runtimes verde de PR #16](https://github.com/Khr0x/zapcloud/actions/runs/35754499341)
+y [CI general verde](https://github.com/Khr0x/zapcloud/actions/runs/35754499375), commit `972c567`,
+integrado en `main`. Ambos RIC reales pasan; la instalación Python ahora fija su ABI 3.13
+también en hosts Linux nativos.
+
+**Golden compatibility (base local; gate abierto):** [tests/golden/](tests/golden/README.md)
+comparte 22 casos entre AWS CLI v2, SDK JS v3 y Boto3 (66 comprobaciones): CRUD,
+Invoke/FunctionError, timeout y recuperación, JSON inválido y bordes de payload/configuración.
+CI ejecuta la matriz contra un daemon aislado con SigV4 y conserva un reporte de versiones,
+procedencia y resultados. La suite detectó y corrigió el rechazo de
+`application/octet-stream` en Invoke, formato utilizado por el SDK JS.
+
+Las expectativas iniciales proceden del contrato documentado; **no son una captura AWS**.
+El runner incluye captura manual explícita y comparación de referencias revisadas, pero
+no se ha ejecutado contra una cuenta AWS. Faltan esa evidencia, schema/errores completos,
+ZIP/env vars, async, response-size y paginación. Este avance no cierra el gate ni v0.1.2.
+
+Validación: [66 comprobaciones locales en Linux ARM64 y macOS](tests/evidence/golden-local.md).
+Pendiente acreditar el nuevo job de CI Linux x86_64 y la referencia AWS.
 
 ---
 

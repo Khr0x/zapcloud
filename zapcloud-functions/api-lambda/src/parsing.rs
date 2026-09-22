@@ -55,12 +55,29 @@ pub(crate) fn require_json(headers: &HeaderMap) -> Result<(), ApiError> {
     }
 }
 
-pub(crate) fn require_json_if_present(headers: &HeaderMap) -> Result<(), ApiError> {
-    if headers.contains_key(header::CONTENT_TYPE) {
-        require_json(headers)
-    } else {
-        Ok(())
+pub(crate) fn require_invoke_content_type(headers: &HeaderMap) -> Result<(), ApiError> {
+    // Invoke carries a blob in the AWS model. The JS SDK sends octet-stream,
+    // while other clients use JSON or omit the header. The payload itself is
+    // still validated as JSON by invoke(), after enforcing the size limit.
+    let Some(value) = headers.get(header::CONTENT_TYPE) else {
+        return Ok(());
+    };
+    let media_type = value
+        .to_str()
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    if media_type.eq_ignore_ascii_case("application/json")
+        || media_type.eq_ignore_ascii_case("application/octet-stream")
+    {
+        return Ok(());
     }
+    Err(ApiError::new(
+        zc_aws_protocol::AwsErrorCode::UnsupportedMediaType,
+        "Content-Type debe ser application/json o application/octet-stream",
+    ))
 }
 
 pub(crate) fn decode_zip(encoded: &str) -> Result<Vec<u8>, ApiError> {

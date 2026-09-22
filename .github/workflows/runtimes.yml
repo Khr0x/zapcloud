@@ -55,11 +55,11 @@ jobs:
         runtime: [nodejs22.x, python3.13]
         arch: [amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Instalar Rust fijado
         run: rustup toolchain install 1.96.1 --profile minimal && rustup default 1.96.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Resolver target/dir/plataforma
         run: |
@@ -143,14 +143,14 @@ jobs:
           exit 1
 
       - name: Subir SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sbom-${{ matrix.runtime }}-${{ matrix.arch }}
           path: ${{ env.BUNDLE_DIR }}/sbom.cdx.json
 
       - name: Subir fragmento de índice
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: index-${{ matrix.runtime }}-${{ matrix.arch }}
           path: runtimes/index.json
@@ -163,8 +163,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: index-*
           path: fragments
@@ -178,7 +178,7 @@ jobs:
       # App token (no el GITHUB_TOKEN): un PR abierto con el token por defecto NO
       # dispara workflows, así que los checks no correrían sobre el PR del índice.
       # El App necesita permisos Contents:RW + Pull requests:RW e instalarse en el repo.
-      - uses: actions/create-github-app-token@v1
+      - uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         id: app-token
         with:
           app-id: ${{ secrets.RUNTIMES_BOT_APP_ID }}
@@ -187,7 +187,7 @@ jobs:
       # Idempotente: sin diff no abre PR; con diff, actualiza SIEMPRE la misma
       # rama/PR (`ci/update-runtime-index`), nunca duplica. Ver nota de bucle abajo.
       - name: Abrir/actualizar PR con el índice
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           add-paths: runtimes/index.json

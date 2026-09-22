@@ -1,0 +1,412 @@
+{
+  "schema": 1,
+  "provenance": {
+    "kind": "documented-contract-not-aws-capture",
+    "sources": [
+      "https://docs.aws.amazon.com/lambda/latest/api/API_Invoke.html",
+      "https://docs.aws.amazon.com/lambda/latest/api/API_CreateFunction.html",
+      "docs/rfc/lambda-zapcloud.md#70-golden-compatibility-tests"
+    ]
+  },
+  "cases": [
+    {
+      "id": "create",
+      "operation": "CreateFunction",
+      "params": {},
+      "expect": {
+        "status": 201,
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "$architecture"
+          ]
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "duplicate",
+      "operation": "CreateFunction",
+      "params": {},
+      "expect": {
+        "status": 409,
+        "error": "ResourceConflictException",
+        "headers": {
+          "x-amzn-errortype": "ResourceConflictException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "get",
+      "operation": "GetFunction",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "Configuration": {
+            "FunctionName": "$name",
+            "FunctionArn": "$arn",
+            "Runtime": "provided.al2023",
+            "Handler": "bootstrap",
+            "MemorySize": 128,
+            "Timeout": 1,
+            "Version": "$LATEST",
+            "Architectures": [
+              "$architecture"
+            ]
+          }
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "list",
+      "operation": "ListFunctions",
+      "params": {},
+      "expect": {
+        "status": 200,
+        "body": {
+          "Functions": "$array"
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "invoke",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "echo": {
+            "golden": true
+          },
+          "handler": "bootstrap",
+          "arn": "$arn"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        }
+      },
+      "payload": "{\"golden\":true}"
+    },
+    {
+      "id": "handler-error",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "errorType": "HandlerError",
+          "errorMessage": "fallo solicitado por el evento"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST",
+          "x-amz-function-error": "Unhandled"
+        }
+      },
+      "payload": "{\"fail\":true}"
+    },
+    {
+      "id": "timeout",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "errorType": "$nonempty",
+          "errorMessage": "$timeout"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST",
+          "x-amz-function-error": "Unhandled"
+        }
+      },
+      "payload": "{\"sleep_ms\":3000}"
+    },
+    {
+      "id": "after-timeout",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "echo": {},
+          "count": 1
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        }
+      }
+    },
+    {
+      "id": "payload-at-limit",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "echo": {}
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        }
+      },
+      "payload_bytes": 6291456
+    },
+    {
+      "id": "payload-over-limit",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 413,
+        "error": "RequestTooLargeException",
+        "headers": {
+          "x-amzn-errortype": "RequestTooLargeException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "payload_bytes": 6291457
+    },
+    {
+      "id": "invalid-json",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 400,
+        "error": "InvalidRequestContentException",
+        "headers": {
+          "x-amzn-errortype": "InvalidRequestContentException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "payload": "{"
+    },
+    {
+      "id": "update-code",
+      "operation": "UpdateFunctionCode",
+      "params": {
+        "FunctionName": "$name",
+        "ZipFile": "$zip2"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "$architecture"
+          ]
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "after-update",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "echo": {},
+          "count": 1
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        }
+      }
+    },
+    {
+      "id": "delete",
+      "operation": "DeleteFunction",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 204
+      }
+    },
+    {
+      "id": "missing-get",
+      "operation": "GetFunction",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "missing-invoke",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "memory-below",
+      "operation": "CreateFunction",
+      "params": {
+        "MemorySize": 127
+      },
+      "expect": {
+        "status": 400,
+        "error": "InvalidParameterValueException",
+        "headers": {
+          "x-amzn-errortype": "InvalidParameterValueException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "memory-above",
+      "operation": "CreateFunction",
+      "params": {
+        "MemorySize": 10241
+      },
+      "expect": {
+        "status": 400,
+        "error": "InvalidParameterValueException",
+        "headers": {
+          "x-amzn-errortype": "InvalidParameterValueException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "timeout-below",
+      "operation": "CreateFunction",
+      "params": {
+        "Timeout": 0
+      },
+      "expect": {
+        "status": 400,
+        "error": "InvalidParameterValueException",
+        "headers": {
+          "x-amzn-errortype": "InvalidParameterValueException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "timeout-above",
+      "operation": "CreateFunction",
+      "params": {
+        "Timeout": 901
+      },
+      "expect": {
+        "status": 400,
+        "error": "InvalidParameterValueException",
+        "headers": {
+          "x-amzn-errortype": "InvalidParameterValueException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      }
+    },
+    {
+      "id": "config-upper-bounds",
+      "operation": "CreateFunction",
+      "params": {
+        "FunctionName": "$limits",
+        "MemorySize": 10240,
+        "Timeout": 900
+      },
+      "expect": {
+        "status": 201,
+        "body": {
+          "FunctionName": "$limits",
+          "MemorySize": 10240,
+          "Timeout": 900
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "delete-upper-bounds",
+      "operation": "DeleteFunction",
+      "params": {
+        "FunctionName": "$limits"
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}
