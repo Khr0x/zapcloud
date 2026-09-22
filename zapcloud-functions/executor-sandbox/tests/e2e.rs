@@ -18,6 +18,8 @@ mod processes;
 fn spec() -> FunctionSpec {
     FunctionSpec {
         function_name: "spike-test".to_string(),
+        function_arn: "arn:aws:lambda:local-1:000000000000:function:spike-test".into(),
+        timeout: std::time::Duration::from_secs(3),
         handler: "spike.handler".to_string(),
         bootstrap_path: PathBuf::from(env!("CARGO_BIN_EXE_bootstrap_spike")),
         task_root: std::env::temp_dir(),
@@ -30,13 +32,29 @@ fn spec() -> FunctionSpec {
 }
 
 #[tokio::test]
+async fn init_no_consume_el_timeout_del_handler() {
+    let exec = ProcessExecutor::start().await.unwrap();
+    let mut spec = spec();
+    spec.handler = "delayed.init".into();
+    spec.timeout = std::time::Duration::from_millis(500);
+    let start = std::time::Instant::now();
+    let mut env = exec.create(&spec).await.unwrap();
+    assert!(matches!(
+        exec.invoke(&mut env, b"{}").await.unwrap(),
+        InvokeOutcome::Success(_)
+    ));
+    assert!(start.elapsed() >= std::time::Duration::from_secs(1));
+    exec.destroy(env).await.unwrap();
+}
+
+#[tokio::test]
 async fn arranca_resuelve_responde_y_reusa_warm() {
     let exec = ProcessExecutor::start().await.expect("start del executor");
-    let env = exec.create(&spec()).await.expect("create del environment");
+    let mut env = exec.create(&spec()).await.expect("create del environment");
 
     // --- Invocación 1: arranca → resuelve handler → responde ---
     let resp1 = exec
-        .invoke(&env, br#"{"hello":"zapcloud"}"#)
+        .invoke(&mut env, br#"{"hello":"zapcloud"}"#)
         .await
         .expect("invoke #1");
     let InvokeOutcome::Success(resp1) = resp1 else {
@@ -54,7 +72,7 @@ async fn arranca_resuelve_responde_y_reusa_warm() {
 
     // --- Invocación 2: mismo environment (warm reuse), sin nuevo proceso ---
     let resp2 = exec
-        .invoke(&env, br#"{"n":2}"#)
+        .invoke(&mut env, br#"{"n":2}"#)
         .await
         .expect("invoke #2 (warm)");
     let InvokeOutcome::Success(resp2) = resp2 else {
@@ -72,11 +90,11 @@ async fn arranca_resuelve_responde_y_reusa_warm() {
 #[tokio::test]
 async fn el_camino_de_error_se_propaga() {
     let exec = ProcessExecutor::start().await.expect("start del executor");
-    let env = exec.create(&spec()).await.expect("create del environment");
+    let mut env = exec.create(&spec()).await.expect("create del environment");
 
     // `{"fail": true}` hace que el handler mande POST .../error (§18).
     let result = exec
-        .invoke(&env, br#"{"fail":true}"#)
+        .invoke(&mut env, br#"{"fail":true}"#)
         .await
         .expect("invoke");
     assert!(matches!(result, InvokeOutcome::FunctionError(_)));
@@ -129,10 +147,10 @@ async fn entorno_hijo_no_hereda_secretos_del_daemon() {
 
     let exec = ProcessExecutor::start().await.expect("start del executor");
     let spec = spec();
-    let env = exec.create(&spec).await.expect("create del environment");
+    let mut env = exec.create(&spec).await.expect("create del environment");
     for _ in 0..2 {
         let response = exec
-            .invoke(&env, br#"{"inspect_env":true}"#)
+            .invoke(&mut env, br#"{"inspect_env":true}"#)
             .await
             .expect("inspeccionar entorno cold/warm");
         let InvokeOutcome::Success(body) = response else {
@@ -176,7 +194,7 @@ async fn limpia_grupos_en_destroy_terminate_y_drop_sin_afectar_otro_environment(
     use std::time::Duration;
 
     let other_exec = ProcessExecutor::start().await.unwrap();
-    let other = other_exec.create(&spec()).await.unwrap();
+    let mut other = other_exec.create(&spec()).await.unwrap();
     for mode in ["destroy", "terminate", "drop", "parent_exited"] {
         let root =
             std::env::temp_dir().join(format!("zc-process-group-{}-{mode}", std::process::id()));
@@ -237,7 +255,7 @@ async fn limpia_grupos_en_destroy_terminate_y_drop_sin_afectar_otro_environment(
             processes::assert_exited(pid).await;
         }
         assert!(matches!(
-            other_exec.invoke(&other, b"{}").await.unwrap(),
+            other_exec.invoke(&mut other, b"{}").await.unwrap(),
             InvokeOutcome::Success(_)
         ));
         std::fs::remove_dir_all(root).unwrap();

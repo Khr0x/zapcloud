@@ -62,6 +62,7 @@ jobs:
           | `oci_push_pull_roundtrip_real` | Registry OCI y `ZAPCLOUD_OCI_TEST_REF` |
 
           Ver `tests/README.md` para ejecutarlas explícitamente con `--ignored`.
+          Los E2E Node/Python se ejecutan en `runtimes.yml` para PRs con cambios de código, dependencias o pruebas.
           Este workflow no certifica paridad RIC Linux ni cierra v0.1.2.
           EOF
           echo "::notice::Node/Python E2E y OCI round-trip omitidos explícitamente; ver resumen y tests/README.md."

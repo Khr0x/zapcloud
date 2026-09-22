@@ -458,7 +458,7 @@ try {
 for (;;) {
   const res = await fetch(`${base}/invocation/next`);
   const reqId = res.headers.get("lambda-runtime-aws-request-id");
-  const deadline = Number(res.headers.get("lambda-runtime-deadline-ms")) || (Date.now() + 3000);
+  const deadline = Number(res.headers.get("lambda-runtime-deadline-ms"));
   const raw = await res.text();
   let event;
   try { event = raw ? JSON.parse(raw) : {}; } catch { event = raw; }
@@ -467,7 +467,7 @@ for (;;) {
     functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
     functionVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION,
     memoryLimitInMB: process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE,
-    invokedFunctionArn: process.env.AWS_LAMBDA_FUNCTION_ARN || "",
+    invokedFunctionArn: res.headers.get("lambda-runtime-invoked-function-arn"),
     logGroupName: process.env.AWS_LAMBDA_LOG_GROUP_NAME,
     logStreamName: process.env.AWS_LAMBDA_LOG_STREAM_NAME,
     getRemainingTimeInMillis: () => Math.max(0, deadline - Date.now()),
@@ -495,6 +495,7 @@ import importlib
 import json
 import os
 import sys
+import time
 import traceback
 from urllib import request
 
@@ -542,6 +543,8 @@ except Exception as e:  # noqa: BLE001
 while True:
     with request.urlopen(f"{base}/invocation/next") as res:
         req_id = res.headers.get("Lambda-Runtime-Aws-Request-Id")
+        deadline = int(res.headers["Lambda-Runtime-Deadline-Ms"])
+        arn = res.headers["Lambda-Runtime-Invoked-Function-Arn"]
         raw = res.read()
     try:
         event = json.loads(raw) if raw else {}
@@ -552,7 +555,8 @@ while True:
         "function_name": os.environ.get("AWS_LAMBDA_FUNCTION_NAME"),
         "function_version": os.environ.get("AWS_LAMBDA_FUNCTION_VERSION"),
         "memory_limit_in_mb": os.environ.get("AWS_LAMBDA_FUNCTION_MEMORY_SIZE"),
-        "invoked_function_arn": os.environ.get("AWS_LAMBDA_FUNCTION_ARN", ""),
+        "invoked_function_arn": arn,
+        "get_remaining_time_in_millis": lambda self: max(0, deadline - int(time.time() * 1000)),
         "log_group_name": os.environ.get("AWS_LAMBDA_LOG_GROUP_NAME"),
         "log_stream_name": os.environ.get("AWS_LAMBDA_LOG_STREAM_NAME"),
     })()

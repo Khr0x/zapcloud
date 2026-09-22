@@ -16,8 +16,8 @@ Estado actual: el walking skeleton v0.1 y la base local de los pasos 0–8 está
 implementados. v0.1.1 (Node/Python y distribución) sigue parcial: el carril Linux con
 RIC real, los golden tests y el upgrade/rollback de runtimes requieren el milestone
 obligatorio **v0.1.2 Stabilization** antes del paso 12. El executor actual corre en
-modo process/T1 de desarrollo, **no ofrece aislamiento ni aplica límites de memoria o
-timeout**, y no debe recibir código no confiable. El diseño completo vive en
+modo process/T1 de desarrollo: aplica `Timeout` por invocación, pero **no ofrece
+aislamiento ni limita memoria**, y no debe recibir código no confiable. El diseño completo vive en
 [`docs/rfc/`](docs/rfc/):
 
 El estado y los criterios de aceptación se mantienen en el [roadmap de Functions](ROADMAP_MVP.md).

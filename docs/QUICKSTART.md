@@ -254,7 +254,7 @@ curl -s http://127.0.0.1:9000/metrics
 ## 9. Qué NO funciona todavía (por roadmap)
 
 - **Aislamiento**: process/T1, el código **no está sandboxeado** (v0.2).
-- **Límites**: `Timeout` y `MemorySize` se aceptan en metadata, pero aún no se aplican al proceso.
+- **Límites**: `Timeout` se aplica desde la entrega del evento al runtime. Al vencer, Invoke devuelve HTTP 200 con `X-Amz-Function-Error: Unhandled`, termina el grupo de procesos y la siguiente invocación arranca de nuevo. Init tiene un límite separado de 10 s, sin retry. `MemorySize` sigue siendo metadata; no limita la memoria del proceso.
 - **Arquitectura**: la arquitectura declarada todavía no selecciona un worker distinto; usa la del host.
 - **Seguridad remota**: `auth=none` solo es apropiado para loopback/laboratorio; no hay frontera contra secretos del daemon.
 - **Invoke async** (`Event`, 202): solo síncrono `RequestResponse` (v0.3).
