@@ -3123,6 +3123,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
  "zc-executor-core",
 ]
 
@@ -3148,6 +3149,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "zc-artifact-store",
+ "zc-aws-protocol",
  "zc-executor-sandbox",
  "zc-persistence",
  "zc-runtime",

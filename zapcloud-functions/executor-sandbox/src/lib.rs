@@ -22,32 +22,36 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::time::Instant;
+use uuid::Uuid;
 
 /// Ruta base del protocolo Runtime API que fija AWS (§18).
 const RUNTIME_API_BASE: &str = "/2018-06-01/runtime";
 /// Header con el id de request que el runtime lee tras `GET /invocation/next`.
 const REQUEST_ID_HEADER: &str = "lambda-runtime-aws-request-id";
-/// Tope de espera de una invocación síncrona en el spike (evita colgar el test).
-const INVOKE_TIMEOUT: Duration = Duration::from_secs(15);
+/// Límite de inicialización hasta el primer /next. No implementa aún el retry
+/// de Init de AWS; el Timeout de la función empieza al entregar el evento.
+const INIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Lo necesario para lanzar un proceso con el **contrato de entorno de §16**.
 /// En v0.1 lo construye `zc-invocation` a partir de la metadata de la función
 /// (§13); en el spike lo arma el test.
 pub struct FunctionSpec {
     pub function_name: String,
+    pub function_arn: String,
+    pub timeout: Duration,
     pub handler: String,
     /// Ejecutable bootstrap (el `provided.al2023`). En el spike, `bootstrap_spike`;
     /// en v0.1 real, el `bootstrap` del ZIP desempaquetado en `task_root`.
@@ -72,12 +76,21 @@ pub struct FunctionSpec {
 /// Mientras exista, está **warm** y reutilizable (§20–23).
 pub struct Environment {
     child: Child,
+    function_arn: HeaderValue,
+    timeout: Duration,
+    needs_reset: bool,
+    #[cfg(unix)]
+    group_terminated: bool,
 }
 
 impl Environment {
+    pub fn needs_reset(&self) -> bool {
+        self.needs_reset
+    }
     /// En Unix mata el grupo antes de recolectar al bootstrap; así también se
     /// limpian hijos cuyo padre ya terminó. Se puede llamar más de una vez.
     pub async fn terminate(&mut self) -> Result<()> {
+        self.needs_reset = true;
         #[cfg(unix)]
         self.kill_process_group()
             .context("kill del grupo del bootstrap")?;
@@ -88,7 +101,12 @@ impl Environment {
     }
 
     #[cfg(unix)]
-    fn kill_process_group(&self) -> std::io::Result<()> {
+    fn kill_process_group(&mut self) -> std::io::Result<()> {
+        // No señalar otra vez tras SIGKILL (también desde cancelación/Drop).
+        // En macOS killpg puede devolver EPERM si solo quedan zombies.
+        if self.group_terminated {
+            return Ok(());
+        }
         // No recolectar al líder antes de señalar el grupo: mientras conservamos
         // su Child sin wait/try_wait, su PID no puede reutilizarse. Tras wait,
         // id() es None, evitando señales duplicadas desde terminate o Drop.
@@ -103,7 +121,24 @@ impl Environment {
                 return Err(error);
             }
         }
+        self.group_terminated = true;
         Ok(())
+    }
+}
+
+/// Al cancelar el Invoke también se detiene el proceso. El invocador recrea
+/// este environment antes de reutilizarlo; no queda un handler sin deadline.
+struct InvocationGuard<'a>(&'a mut Environment);
+
+impl Drop for InvocationGuard<'_> {
+    fn drop(&mut self) {
+        if self.0.needs_reset {
+            #[cfg(unix)]
+            if let Err(error) = self.0.kill_process_group() {
+                eprintln!("[executor] cancelación: kill del grupo falló: {error}");
+            }
+            let _ = self.0.child.start_kill();
+        }
     }
 }
 
@@ -121,7 +156,11 @@ impl Drop for Environment {
 /// Una invocación en vuelo: el payload a entregar y por dónde devolver el
 /// resultado (o el error) al llamador de `invoke`.
 struct Invocation {
+    request_id: String,
     payload: Vec<u8>,
+    function_arn: HeaderValue,
+    timeout: Duration,
+    started: oneshot::Sender<Instant>,
     respond_to: InvocationSender,
 }
 
@@ -135,7 +174,12 @@ pub enum InvokeOutcome {
 }
 
 type InvocationSender = oneshot::Sender<InvokeOutcome>;
-type PendingInvocations = HashMap<String, InvocationSender>;
+struct PendingInvocation {
+    deadline: Instant,
+    respond_to: InvocationSender,
+}
+
+type PendingInvocations = HashMap<String, PendingInvocation>;
 
 /// Estado compartido entre los handlers HTTP del Runtime API.
 #[derive(Clone)]
@@ -144,8 +188,6 @@ struct RuntimeApiState {
     incoming: Arc<Mutex<mpsc::Receiver<Invocation>>>,
     /// request_id -> canal por el que devolver la respuesta de esa invocación.
     pending: Arc<Mutex<PendingInvocations>>,
-    /// Generador monótono de request ids.
-    seq: Arc<AtomicU64>,
 }
 
 /// Executor en modo process (T1, sin aislamiento). Dueño del servidor Runtime
@@ -153,6 +195,7 @@ struct RuntimeApiState {
 pub struct ProcessExecutor {
     addr: SocketAddr,
     tx: mpsc::Sender<Invocation>,
+    state: RuntimeApiState,
     _server: tokio::task::JoinHandle<()>,
 }
 
@@ -176,7 +219,6 @@ impl ProcessExecutor {
         let state = RuntimeApiState {
             incoming: Arc::new(Mutex::new(rx)),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            seq: Arc::new(AtomicU64::new(0)),
         };
 
         let app = Router::new()
@@ -193,7 +235,7 @@ impl ProcessExecutor {
                 post(invocation_error),
             )
             .route(&format!("{RUNTIME_API_BASE}/init/error"), post(init_error))
-            .with_state(state);
+            .with_state(state.clone());
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -206,6 +248,7 @@ impl ProcessExecutor {
         Ok(Self {
             addr,
             tx,
+            state,
             _server: server,
         })
     }
@@ -219,6 +262,12 @@ impl ProcessExecutor {
     /// No se hereda ninguna variable del daemon: se permite únicamente este
     /// contrato y un PATH fijo para los comandos de los bootstraps en shell.
     pub async fn create(&self, spec: &FunctionSpec) -> Result<Environment> {
+        anyhow::ensure!(
+            !spec.timeout.is_zero() && spec.timeout <= Duration::from_secs(900),
+            "Timeout debe estar entre 0 y 900 segundos"
+        );
+        let function_arn = HeaderValue::from_str(&spec.function_arn)
+            .context("ARN inválido para el header Runtime API")?;
         let mut command = Command::new(&spec.bootstrap_path);
         #[cfg(unix)]
         command.process_group(0);
@@ -252,27 +301,71 @@ impl ProcessExecutor {
             .spawn()
             .with_context(|| format!("spawn del bootstrap {:?}", spec.bootstrap_path))?;
 
-        Ok(Environment { child })
+        Ok(Environment {
+            child,
+            function_arn,
+            timeout: spec.timeout,
+            needs_reset: false,
+            #[cfg(unix)]
+            group_terminated: false,
+        })
     }
 
     /// Invocación síncrona (`RequestResponse`). Encola el evento y espera a que
-    /// el proceso warm lo procese y responda. `_env` no se usa aún: con un solo
-    /// proceso por executor, la cola lo enruta implícitamente (en v0.1 real,
-    /// las colas se indexan por función).
-    pub async fn invoke(&self, _env: &Environment, payload: &[u8]) -> Result<InvokeOutcome> {
+    /// el proceso warm lo procese y responda antes de su deadline. El llamador
+    /// serializa las invocaciones de este environment mediante su préstamo mutable.
+    pub async fn invoke(&self, env: &mut Environment, payload: &[u8]) -> Result<InvokeOutcome> {
+        anyhow::ensure!(!env.needs_reset, "environment requiere un nuevo cold start");
+        env.needs_reset = true;
+        let guard = InvocationGuard(env);
+        let request_id = Uuid::new_v4().to_string();
+        let (started, start_rx) = oneshot::channel();
         let (respond_to, rx) = oneshot::channel();
         self.tx
             .send(Invocation {
+                request_id: request_id.clone(),
                 payload: payload.to_vec(),
+                function_arn: guard.0.function_arn.clone(),
+                timeout: guard.0.timeout,
+                started,
                 respond_to,
             })
             .await
             .map_err(|_| anyhow!("servidor Runtime API caído"))?;
 
-        tokio::time::timeout(INVOKE_TIMEOUT, rx)
-            .await
-            .context("timeout esperando respuesta de la función")?
-            .map_err(|_| anyhow!("la invocación se descartó sin respuesta"))
+        let result = async {
+            let deadline = tokio::time::timeout(INIT_TIMEOUT, start_rx)
+                .await
+                .context("timeout durante Init")?
+                .context("el Runtime API no entregó el evento")?;
+            Ok::<_, anyhow::Error>(tokio::time::timeout_at(deadline, rx).await)
+        }
+        .await;
+        self.state.pending.lock().await.remove(&request_id);
+        match result {
+            Ok(Ok(Ok(outcome))) => {
+                guard.0.needs_reset = false;
+                Ok(outcome)
+            }
+            Ok(Err(_)) => {
+                guard.0.terminate().await?;
+                Ok(InvokeOutcome::FunctionError(serde_json::to_vec(
+                    &serde_json::json!({
+                        "errorType": "Sandbox.Timedout",
+                        "errorMessage": format!("Task timed out after {:.2} seconds", guard.0.timeout.as_secs_f64()),
+                        "requestId": request_id,
+                    }),
+                )?))
+            }
+            Ok(Ok(Err(_))) => {
+                guard.0.terminate().await?;
+                Err(anyhow!("la invocación se descartó sin respuesta"))
+            }
+            Err(error) => {
+                guard.0.terminate().await?;
+                Err(error)
+            }
+        }
     }
 
     /// Mata el proceso (fin del environment). Reclamación explícita; en v0.1
@@ -285,18 +378,48 @@ impl ProcessExecutor {
 /// `GET /2018-06-01/runtime/invocation/next` — long-poll: espera a que haya una
 /// invocación, le asigna request_id y entrega el evento con el header (§18).
 async fn next_invocation(State(st): State<RuntimeApiState>) -> impl IntoResponse {
-    let inv = {
-        let mut incoming = st.incoming.lock().await;
-        incoming.recv().await
-    };
-    let Some(inv) = inv else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    };
-
-    let id = format!("req-{}", st.seq.fetch_add(1, Ordering::SeqCst));
-    st.pending.lock().await.insert(id.clone(), inv.respond_to);
-
-    ([(REQUEST_ID_HEADER, id)], inv.payload).into_response()
+    loop {
+        let inv = st.incoming.lock().await.recv().await;
+        let Some(inv) = inv else {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        };
+        if inv.respond_to.is_closed() || inv.started.is_closed() {
+            continue;
+        }
+        let deadline = Instant::now() + inv.timeout;
+        let deadline_ms = (SystemTime::now() + inv.timeout)
+            .duration_since(UNIX_EPOCH)
+            .expect("reloj posterior a Unix epoch")
+            .as_millis();
+        let mut pending = st.pending.lock().await;
+        pending.insert(
+            inv.request_id.clone(),
+            PendingInvocation {
+                deadline,
+                respond_to: inv.respond_to,
+            },
+        );
+        if inv.started.send(deadline).is_err() {
+            pending.remove(&inv.request_id);
+            continue;
+        }
+        return (
+            [
+                ("content-type", HeaderValue::from_static("application/json")),
+                (
+                    REQUEST_ID_HEADER,
+                    HeaderValue::from_str(&inv.request_id).unwrap(),
+                ),
+                (
+                    "lambda-runtime-deadline-ms",
+                    HeaderValue::from_str(&deadline_ms.to_string()).unwrap(),
+                ),
+                ("lambda-runtime-invoked-function-arn", inv.function_arn),
+            ],
+            inv.payload,
+        )
+            .into_response();
+    }
 }
 
 /// `POST .../invocation/{id}/response` — el runtime entregó el resultado.
@@ -305,10 +428,7 @@ async fn invocation_response(
     State(st): State<RuntimeApiState>,
     body: Bytes,
 ) -> StatusCode {
-    if let Some(tx) = st.pending.lock().await.remove(&id) {
-        let _ = tx.send(InvokeOutcome::Success(body.to_vec()));
-    }
-    StatusCode::ACCEPTED
+    complete_invocation(st, id, InvokeOutcome::Success(body.to_vec())).await
 }
 
 /// `POST .../invocation/{id}/error` — el handler falló (§16, framing de error).
@@ -317,8 +437,25 @@ async fn invocation_error(
     State(st): State<RuntimeApiState>,
     body: Bytes,
 ) -> StatusCode {
-    if let Some(tx) = st.pending.lock().await.remove(&id) {
-        let _ = tx.send(InvokeOutcome::FunctionError(body.to_vec()));
+    complete_invocation(st, id, InvokeOutcome::FunctionError(body.to_vec())).await
+}
+
+async fn complete_invocation(
+    st: RuntimeApiState,
+    id: String,
+    outcome: InvokeOutcome,
+) -> StatusCode {
+    let mut pending = st.pending.lock().await;
+    // Una respuesta tardía nunca completa ni puede contaminar otra invocación.
+    if pending
+        .get(&id)
+        .is_none_or(|inv| Instant::now() >= inv.deadline)
+    {
+        return StatusCode::BAD_REQUEST;
+    }
+    let inv = pending.remove(&id).unwrap();
+    if inv.respond_to.send(outcome).is_err() {
+        return StatusCode::BAD_REQUEST;
     }
     StatusCode::ACCEPTED
 }
@@ -328,4 +465,77 @@ async fn invocation_error(
 async fn init_error(body: String) -> StatusCode {
     eprintln!("[runtime-api] init/error: {body}");
     StatusCode::ACCEPTED
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn runtime_api_rechaza_ids_desconocidos_duplicados_y_expirados() {
+        let executor = ProcessExecutor::start().await.unwrap();
+        let client = reqwest::Client::new();
+        let base = format!("http://{}{RUNTIME_API_BASE}/invocation", executor.addr);
+        for expired in [false, true] {
+            let id = Uuid::new_v4().to_string();
+            let (started, start_rx) = oneshot::channel();
+            let (respond_to, response_rx) = oneshot::channel();
+            executor
+                .tx
+                .send(Invocation {
+                    request_id: id.clone(),
+                    payload: b"{}".to_vec(),
+                    function_arn: HeaderValue::from_static(
+                        "arn:aws:lambda:local-1:000000000000:function:test",
+                    ),
+                    timeout: if expired {
+                        Duration::from_millis(100)
+                    } else {
+                        Duration::from_secs(3)
+                    },
+                    started,
+                    respond_to,
+                })
+                .await
+                .unwrap();
+            let next = client.get(format!("{base}/next")).send().await.unwrap();
+            assert_eq!(next.status(), StatusCode::OK);
+            assert_eq!(next.headers()["content-type"], "application/json");
+            assert_eq!(next.headers()[REQUEST_ID_HEADER], id);
+            let deadline = start_rx.await.unwrap();
+            let post = |id: &str, suffix: &str| {
+                client.post(format!("{base}/{id}/{suffix}")).body("result")
+            };
+            assert_eq!(
+                post("unknown", "response").send().await.unwrap().status(),
+                StatusCode::BAD_REQUEST
+            );
+            if expired {
+                tokio::time::sleep_until(deadline).await;
+                for suffix in ["response", "error"] {
+                    assert_eq!(
+                        post(&id, suffix).send().await.unwrap().status(),
+                        StatusCode::BAD_REQUEST
+                    );
+                }
+                assert!(executor.state.pending.lock().await.remove(&id).is_some());
+                assert!(response_rx.await.is_err());
+            } else {
+                assert_eq!(
+                    post(&id, "response").send().await.unwrap().status(),
+                    StatusCode::ACCEPTED
+                );
+                assert_eq!(
+                    response_rx.await.unwrap(),
+                    InvokeOutcome::Success(b"result".to_vec())
+                );
+                for suffix in ["response", "error"] {
+                    assert_eq!(
+                        post(&id, suffix).send().await.unwrap().status(),
+                        StatusCode::BAD_REQUEST
+                    );
+                }
+            }
+        }
+    }
 }

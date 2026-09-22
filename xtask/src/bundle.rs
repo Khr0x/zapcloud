@@ -270,9 +270,9 @@ pub fn verify_cli(dir: &str) -> Result<()> {
 
 fn assemble(family: Family, target: Target, out: &Path) -> Result<()> {
     let host = Target::host()?;
-    // Native si target==host. Los targets Linux se pueden ensamblar desde
-    // cualquier host vía Docker (el RIC compila su cliente nativo dentro de un
-    // contenedor del target, §17). No hay cross-build de darwin.
+    // Los targets Linux se pueden ensamblar desde cualquier host vía Docker.
+    // Python usa Docker incluso si target==host para fijar la ABI de su RIC;
+    // Node admite instalación nativa. No hay cross-build de darwin.
     let via_docker = target != host && target.os == Os::Linux;
     if target != host && !via_docker {
         bail!(
@@ -458,7 +458,7 @@ try {
 for (;;) {
   const res = await fetch(`${base}/invocation/next`);
   const reqId = res.headers.get("lambda-runtime-aws-request-id");
-  const deadline = Number(res.headers.get("lambda-runtime-deadline-ms")) || (Date.now() + 3000);
+  const deadline = Number(res.headers.get("lambda-runtime-deadline-ms"));
   const raw = await res.text();
   let event;
   try { event = raw ? JSON.parse(raw) : {}; } catch { event = raw; }
@@ -467,7 +467,7 @@ for (;;) {
     functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
     functionVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION,
     memoryLimitInMB: process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE,
-    invokedFunctionArn: process.env.AWS_LAMBDA_FUNCTION_ARN || "",
+    invokedFunctionArn: res.headers.get("lambda-runtime-invoked-function-arn"),
     logGroupName: process.env.AWS_LAMBDA_LOG_GROUP_NAME,
     logStreamName: process.env.AWS_LAMBDA_LOG_STREAM_NAME,
     getRemainingTimeInMillis: () => Math.max(0, deadline - Date.now()),
@@ -495,6 +495,7 @@ import importlib
 import json
 import os
 import sys
+import time
 import traceback
 from urllib import request
 
@@ -542,6 +543,8 @@ except Exception as e:  # noqa: BLE001
 while True:
     with request.urlopen(f"{base}/invocation/next") as res:
         req_id = res.headers.get("Lambda-Runtime-Aws-Request-Id")
+        deadline = int(res.headers["Lambda-Runtime-Deadline-Ms"])
+        arn = res.headers["Lambda-Runtime-Invoked-Function-Arn"]
         raw = res.read()
     try:
         event = json.loads(raw) if raw else {}
@@ -552,7 +555,8 @@ while True:
         "function_name": os.environ.get("AWS_LAMBDA_FUNCTION_NAME"),
         "function_version": os.environ.get("AWS_LAMBDA_FUNCTION_VERSION"),
         "memory_limit_in_mb": os.environ.get("AWS_LAMBDA_FUNCTION_MEMORY_SIZE"),
-        "invoked_function_arn": os.environ.get("AWS_LAMBDA_FUNCTION_ARN", ""),
+        "invoked_function_arn": arn,
+        "get_remaining_time_in_millis": lambda self: max(0, deadline - int(time.time() * 1000)),
         "log_group_name": os.environ.get("AWS_LAMBDA_LOG_GROUP_NAME"),
         "log_stream_name": os.environ.get("AWS_LAMBDA_LOG_STREAM_NAME"),
     })()
@@ -682,8 +686,8 @@ struct RicInstall {
 }
 
 /// Instala el RIC del lenguaje. `Ok(None)` = no se instala (macOS Python, que
-/// corre con el cliente dev). El env `via_docker` compila el cliente nativo del
-/// RIC dentro de un contenedor del target Linux (§17).
+/// corre con el cliente dev). `via_docker` selecciona el build de Node en un
+/// contenedor del target; Python Linux siempre usa contenedor (§17).
 fn install_ric(
     family: Family,
     work: &Path,
@@ -692,7 +696,7 @@ fn install_ric(
 ) -> Result<Option<RicInstall>> {
     match family {
         Family::Node => install_ric_node(work, target, via_docker).map(Some),
-        Family::Python => install_ric_python(work, target, via_docker),
+        Family::Python => install_ric_python(work, target),
     }
 }
 
@@ -752,7 +756,7 @@ fn install_ric_node(work: &Path, target: Target, via_docker: bool) -> Result<Ric
     })
 }
 
-fn install_ric_python(work: &Path, target: Target, via_docker: bool) -> Result<Option<RicInstall>> {
+fn install_ric_python(work: &Path, target: Target) -> Result<Option<RicInstall>> {
     // macOS: el RIC de AWS (extensión C contra libcurl) no compila limpio en
     // Darwin. El bundle dev corre solo con dev-runtime.py (§19).
     if target.os == Os::Darwin {
@@ -771,20 +775,10 @@ fn install_ric_python(work: &Path, target: Target, via_docker: bool) -> Result<O
     )
     .context("copiando requirements.txt pinneado (xtask/assets/python313)")?;
 
-    if via_docker {
-        install_ric_python_docker(&proj, target)?;
-    } else {
-        // Native (host Linux): pip compila el cliente nativo del RIC. Requiere
-        // toolchain de C + libcurl en el host (documentado en runtimes/README).
-        run_cmd(
-            Command::new("pip3")
-                .args(["install", "--no-cache-dir", "--target"])
-                .arg(&ric)
-                .arg("-r")
-                .arg(proj.join("requirements.txt")),
-        )
-        .context("pip install del RIC (awslambdaric)")?;
-    }
+    // También en un host Linux nativo: su pip3 puede usar otra ABI (p.ej.
+    // CPython 3.12 en Ubuntu 24.04). El RIC debe cargar con el Python 3.13
+    // del bundle; OS/arquitectura iguales no garantizan compatibilidad de ABI.
+    install_ric_python_docker(&proj, target)?;
 
     if !ric.join("awslambdaric").is_dir() {
         bail!("el RIC (awslambdaric) no quedó en {ric:?} tras pip install");

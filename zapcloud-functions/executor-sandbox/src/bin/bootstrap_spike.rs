@@ -21,6 +21,9 @@ fn main() {
     let api = env::var("AWS_LAMBDA_RUNTIME_API")
         .expect("AWS_LAMBDA_RUNTIME_API no está definido (lo inyecta el executor)");
     let handler = env::var("_HANDLER").unwrap_or_default();
+    if handler == "delayed.init" {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
     let base = format!("http://{api}{}", "/2018-06-01/runtime");
 
     let client = reqwest::blocking::Client::new();

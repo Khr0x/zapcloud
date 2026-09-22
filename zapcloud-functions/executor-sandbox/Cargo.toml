@@ -19,6 +19,7 @@ axum.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+uuid.workspace = true
 # El bootstrap (bin) es un cliente HTTP blocking del Runtime API.
 reqwest.workspace = true
 

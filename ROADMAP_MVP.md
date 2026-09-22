@@ -132,13 +132,14 @@ afirmaciones actuales en comportamiento verificable.
 
 **CI general implementado:** [workflow CI](.github/workflows/ci.yml) con Rust fijado,
 cuatro checks independientes y omisiones explícitas. Comandos y alcance en
-[tests/README.md](tests/README.md). Pendiente enlazar una ejecución verde de Actions
-para acreditar el gate; esto no cambia el estado parcial de los pasos 9–11.
+[tests/README.md](tests/README.md). Evidencia: [CI verde de hardening, run 35699345402](https://github.com/Khr0x/zapcloud/actions/runs/35699345402),
+integrado por PR #15 después de CI general (#13). Esto no cambia el estado parcial
+de los pasos 9–11.
 
 **Definition of Done:** ningún paso 9–11 vuelve a ✅ hasta que todos los gates anteriores
 estén verdes en CI y exista evidencia reproducible enlazada desde este documento.
 
-**Seguridad process (parcial):** `auth=none` se rechaza fuera de loopback al cargar la
+**Seguridad process (gate acreditado):** `auth=none` se rechaza fuera de loopback al cargar la
 configuración, antes del preflight, almacenamiento o bind. La excepción explícita es
 `auth.allow_insecure_non_loopback = true` (default `false`), con advertencia al arrancar.
 Cobertura: matriz IPv4/IPv6, defaults, opt-in y SigV4 en `zc-config`, más rechazo de
@@ -149,8 +150,30 @@ proceso cold/warm recibe exactamente esa lista. En Unix cada environment crea un
 propio y lo termina al destruirlo, invalidarlo o liberarlo. Los E2E cubren hijos, líder
 ya terminado, terminación repetida, Drop e independencia de otra función:
 `cargo test -p zc-executor-sandbox -p zc-invocation --locked --test e2e`.
-Pendiente: enlazar evidencia verde de CI. Process/T1 sigue sin aislamiento de
+Evidencia: [CI verde de PR #15](https://github.com/Khr0x/zapcloud/actions/runs/35699345402).
+Process/T1 sigue sin aislamiento de
 usuario/filesystem/red y no contiene procesos que abandonen deliberadamente su grupo.
+
+**Runtime API (implementado; evidencia CI pendiente):** `/next` entrega un request ID
+UUID por invocación, `Lambda-Runtime-Deadline-Ms` (epoch ms) y
+`Lambda-Runtime-Invoked-Function-Arn` construido con la región, cuenta y nombre reales.
+El evento se entrega como `application/json`, necesario para que el RIC Python lo deserialice.
+El `Timeout` guardado empieza al entregar el evento; Init tiene un límite separado de
+10 s (sin retry de Init todavía). El timeout devuelve HTTP 200 +
+`X-Amz-Function-Error: Unhandled`, termina el grupo y fuerza cold start en el siguiente
+Invoke. Cancelar la espera también termina el grupo y obliga a recrearlo. Un error
+normal del handler conserva el environment warm. Respuestas desconocidas, repetidas o
+fuera de deadline se rechazan con HTTP 400.
+
+Los E2E Node/Python comprueban contexto, cold/warm, error, timeout y reinicio; en Linux
+exigen los RIC nativos. El workflow `runtimes.yml` los ejecuta antes de publicar y se
+activa en PRs que cambian el executor, invocador, API, dependencias o pruebas.
+Comandos y alcance en [tests/README.md](tests/README.md). No implica paridad completa:
+X-Ray/ClientContext/Cognito e Init-error/retry aún no están cubiertos, y `MemorySize`
+sigue siendo metadata sin enforcement. La matriz golden sigue pendiente.
+
+Validación local: [Linux ARM64 con RIC reales, 2026-09-22](tests/evidence/runtime-api-linux-arm64.md).
+Pendiente enlazar la ejecución de Actions de esta implementación en Linux x86_64.
 
 ---
 

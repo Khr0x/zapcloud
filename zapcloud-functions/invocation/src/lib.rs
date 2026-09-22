@@ -39,6 +39,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use zc_artifact_store::ArtifactStore;
+use zc_aws_protocol::LambdaArn;
 use zc_executor_sandbox::{Environment, FunctionSpec, ProcessExecutor};
 use zc_persistence::{Database, Function};
 use zc_runtime::{resolve as resolve_runtime, RuntimeError, RuntimeSource};
@@ -122,6 +123,7 @@ pub struct Invoker {
     runtimes_root: PathBuf,
     /// Región del endpoint, propagada al contrato de entorno del runtime.
     region: String,
+    account_id: String,
     /// El lock del mapa solo protege el registro; cada environment tiene su
     /// propio lock para conservar la semántica de una invocación por proceso.
     envs: Arc<RwLock<WarmEnvs>>,
@@ -134,6 +136,7 @@ impl Invoker {
         work_root: PathBuf,
         runtimes_root: PathBuf,
         region: impl Into<String>,
+        account_id: impl Into<String>,
     ) -> Self {
         Self {
             db,
@@ -141,6 +144,7 @@ impl Invoker {
             work_root,
             runtimes_root,
             region: region.into(),
+            account_id: account_id.into(),
             envs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -189,14 +193,22 @@ impl Invoker {
         };
 
         // 4. Invocar sobre el proceso warm y devolver la respuesta.
-        let warm = warm.lock().await;
+        let mut warm = warm.lock().await;
         if warm.retired {
             return Err(InvocationError::Execution(anyhow::anyhow!(
                 "environment retirado"
             )));
         }
-        warm.executor
-            .invoke(&warm.env, payload)
+        if warm.env.needs_reset() {
+            warm.env
+                .terminate()
+                .await
+                .map_err(InvocationError::Execution)?;
+            *warm = self.cold_start(&function).await?;
+        }
+        let WarmEnv { executor, env, .. } = &mut *warm;
+        executor
+            .invoke(env, payload)
             .await
             .map_err(InvocationError::Execution)
     }
@@ -301,6 +313,13 @@ impl Invoker {
             .map_err(InvocationError::Execution)?;
         let spec = FunctionSpec {
             function_name: function.name.clone(),
+            function_arn: LambdaArn::new(&self.region, &self.account_id, &function.name)
+                .map_err(|e| InvocationError::Execution(anyhow::anyhow!(e)))?
+                .to_string(),
+            timeout: std::time::Duration::from_secs(
+                u64::try_from(function.timeout)
+                    .map_err(|e| InvocationError::Execution(anyhow::anyhow!(e)))?,
+            ),
             handler: function.handler.clone(),
             bootstrap_path,
             task_root: task_root.clone(),

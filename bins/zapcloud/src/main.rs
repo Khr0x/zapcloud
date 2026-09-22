@@ -193,12 +193,14 @@ async fn build_app(config: &Config) -> Result<Router> {
         expected: config.runtimes.preinstall.clone(),
     };
     let manager = FunctionManager::new(db.clone(), store.clone());
+    let account_id = "000000000000";
     let invoker = Invoker::new(
         db.clone(),
         store.clone(),
         work_root,
         runtimes_root,
         config.server.region.clone(),
+        account_id,
     );
     let auth = match config.auth.mode {
         AuthModeConfig::None => AuthMode::None,
@@ -218,7 +220,7 @@ async fn build_app(config: &Config) -> Result<Router> {
     let lambda = router(
         manager,
         invoker,
-        LambdaApiConfig::new(config.server.region.clone(), "000000000000", auth)?,
+        LambdaApiConfig::new(config.server.region.clone(), account_id, auth)?,
     );
     let metrics = Arc::new(Metrics::default());
     let mut app = Router::new()
@@ -366,6 +368,8 @@ async fn run_spike() -> Result<()> {
     let exec = ProcessExecutor::start().await?;
     let spec = FunctionSpec {
         function_name: "spike-demo".to_string(),
+        function_arn: "arn:aws:lambda:local-1:000000000000:function:spike-demo".into(),
+        timeout: std::time::Duration::from_secs(3),
         handler: "spike.handler".to_string(),
         bootstrap_path: bootstrap,
         task_root: std::env::temp_dir(),
@@ -376,13 +380,13 @@ async fn run_spike() -> Result<()> {
         log_stream: "spike-demo-stream".to_string(),
     };
 
-    let env = exec.create(&spec).await?;
+    let mut env = exec.create(&spec).await?;
     println!("[spike] bootstrap lanzado, haciendo poll al Runtime API");
 
-    let r1 = exec.invoke(&env, br#"{"hello":"zapcloud"}"#).await?;
+    let r1 = exec.invoke(&mut env, br#"{"hello":"zapcloud"}"#).await?;
     println!("[spike] invoke #1        → {}", outcome_body(&r1));
 
-    let r2 = exec.invoke(&env, br#"{"n":2}"#).await?;
+    let r2 = exec.invoke(&mut env, br#"{"n":2}"#).await?;
     println!("[spike] invoke #2 (warm) → {}", outcome_body(&r2));
 
     exec.destroy(env).await?;

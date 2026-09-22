@@ -16,6 +16,9 @@ fn main() {
         };
         count += 1;
         let event: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        if let Some(delay) = event["sleep_ms"].as_u64() {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
         let (suffix, response) = if event.get("fail").and_then(|v| v.as_bool()) == Some(true) {
             (
                 "error",
@@ -32,6 +35,9 @@ fn main() {
                     "echo": event,
                     "handler": handler,
                     "pid": std::process::id(),
+                    "request_id": request_id,
+                    "arn": header(&headers, "lambda-runtime-invoked-function-arn"),
+                    "deadline": header(&headers, "lambda-runtime-deadline-ms"),
                     "count": count
                 })
                 .to_string(),

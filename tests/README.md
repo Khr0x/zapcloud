@@ -50,4 +50,36 @@ ZAPCLOUD_OCI_TEST_REF=localhost:5000/zapcloud \
 
 Los logs y el resumen de cada ejecución en Actions son la evidencia de ese commit.
 Añadir este workflow no cierra v0.1.2: siguen pendientes los demás gates del roadmap,
-incluidos los E2E con RIC real y los golden tests.
+incluida la evidencia verde de los E2E con RIC real y los golden tests.
+
+## Contrato Runtime API y timeout
+
+Evidencia local: [Linux ARM64 con ambos RIC reales](evidence/runtime-api-linux-arm64.md).
+
+El workflow [runtimes](../.github/workflows/runtimes.yml) ensambla bundles Linux x86_64,
+verifica integridad/reproducibilidad y ejecuta el E2E del RIC correspondiente **antes de
+publicar**. Los PRs que tocan código, dependencias o pruebas también disparan este gate.
+Un addon nativo ausente hace fallar la prueba; no se acredita el cliente dev como RIC.
+
+Para reproducir en Linux con Rust 1.96.1 y Docker disponibles:
+
+```sh
+cargo run --locked -p xtask -- bundle --runtime nodejs22.x --target linux-x86_64
+cargo run --locked -p xtask -- bundle --runtime python3.13 --target linux-x86_64
+cargo test --locked -p zc-invocation --test e2e invoke_end_to_end -- --ignored
+```
+
+En ARM64 sustituir el target por `linux-arm64`. Las pruebas verifican ARN con región y
+cuenta configuradas, IDs distintos, tiempo restante numérico y decreciente, reutilización
+warm, errores del handler, timeout y recuperación en un proceso nuevo. En macOS los
+mismos casos usan los clientes dev y requieren regenerar sus bundles tras cambios a
+`xtask/src/bundle.rs`.
+
+El workspace prueba además el framing HTTP de timeout (`200` + `FunctionError=Unhandled`),
+que Init no consume el timeout del handler, rechazo de respuestas desconocidas/duplicadas/
+expiradas, terminación de hijos tras timeout/cancelación y continuidad de otra función.
+
+Referencia del contrato: [Runtime API de AWS](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-api.html)
+y [ciclo de ejecución](https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html).
+Esto no certifica la matriz golden completa: X-Ray/ClientContext/Cognito, errores/retry
+de Init y límites de memoria siguen fuera de esta evidencia.

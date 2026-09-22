@@ -51,6 +51,7 @@ async fn setup_with_auth(auth: AuthMode) -> (axum::Router, TempDir) {
         temp.0.join("work"),
         temp.0.join("runtimes"),
         "local-1",
+        "000000000000",
     );
     (router(manager, invoker, LambdaApiConfig::local(auth)), temp)
 }
@@ -646,4 +647,68 @@ async fn errores_internos_no_exponen_detalles_al_cliente() {
     assert!(body.contains("Internal server error"));
     assert!(!body.contains(temp.0.to_string_lossy().as_ref()));
     assert!(!body.contains("No such file"));
+}
+
+#[tokio::test]
+async fn timeout_configurado_es_function_error_y_recrea_environment() {
+    let (app, _temp) = setup().await;
+    let mut body: Value = serde_json::from_slice(&create_body("timed", "provided.al2023")).unwrap();
+    body["Timeout"] = json!(1);
+    let created = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/2015-03-31/functions",
+            serde_json::to_vec(&body).unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = body_json(created).await;
+    let uri = "/2015-03-31/functions/timed/invocations";
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let first = app
+        .clone()
+        .oneshot(json_request("POST", uri, b"{}".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first = body_json(first).await;
+    assert_eq!(first["arn"], created["FunctionArn"]);
+    Uuid::parse_str(first["request_id"].as_str().unwrap()).unwrap();
+    let deadline: u128 = first["deadline"].as_str().unwrap().parse().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    assert!(deadline >= before + 1000 && deadline <= now + 1000);
+
+    let start = std::time::Instant::now();
+    let timeout = app
+        .clone()
+        .oneshot(json_request("POST", uri, br#"{"sleep_ms":4000}"#.to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(timeout.status(), StatusCode::OK);
+    assert_eq!(timeout.headers()["x-amz-function-error"], "Unhandled");
+    assert!(start.elapsed() >= std::time::Duration::from_secs(1));
+    assert!(start.elapsed() < std::time::Duration::from_secs(3));
+    let timeout = body_json(timeout).await;
+    assert_eq!(timeout["errorType"], "Sandbox.Timedout");
+    assert_eq!(timeout["errorMessage"], "Task timed out after 1.00 seconds");
+    assert_ne!(timeout["requestId"], first["request_id"]);
+
+    let next = app
+        .oneshot(json_request("POST", uri, b"{}".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(next.status(), StatusCode::OK);
+    assert!(next.headers().get("x-amz-function-error").is_none());
+    let next = body_json(next).await;
+    assert_eq!(next["count"], 1);
+    assert_ne!(next["pid"], first["pid"]);
+    assert_ne!(next["request_id"], timeout["requestId"]);
 }

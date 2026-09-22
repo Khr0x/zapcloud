@@ -77,7 +77,12 @@ async fn setup_full(
             description: None,
             runtime: runtime.to_string(),
             handler: format!("{name}.handler"),
-            architecture: "arm64".to_string(),
+            architecture: if cfg!(target_arch = "aarch64") {
+                "arm64"
+            } else {
+                "x86_64"
+            }
+            .to_string(),
             memory_size: 128,
             timeout: 3,
             package_type: "Zip".to_string(),
@@ -87,7 +92,14 @@ async fn setup_full(
         .expect("create_function");
     }
 
-    Invoker::new(db, store, unique_tmp("work"), runtimes_root, "us-test-1")
+    Invoker::new(
+        db,
+        store,
+        unique_tmp("work"),
+        runtimes_root,
+        "us-test-1",
+        "123456789012",
+    )
 }
 
 #[tokio::test]
@@ -296,7 +308,7 @@ async fn nodejs_invoke_end_to_end() {
         panic!("esperaba Success en la 2ª invocación");
     };
     let json2: Value = serde_json::from_slice(&body2).expect("respuesta JSON 2");
-    assert_eq!(json["pid"], json2["pid"], "warm reuse: mismo pid");
+    assert_runtime_contract(&invoker, "index", &json, &json2).await;
 }
 
 /// Localiza el bundle `<prefix>-<os>-<arch>` del host en `runtimes/`, o `None`
@@ -315,12 +327,42 @@ fn installed_bundle_root(prefix: &str) -> Option<PathBuf> {
     // El crate vive en zapcloud-functions/invocation; runtimes/ está en la raíz.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtimes");
     let bundle = root.join(format!("{prefix}-{os}-{arch}"));
+    if cfg!(target_os = "linux") && bundle.join("bootstrap").is_file() {
+        let native = if prefix == "nodejs22" {
+            bundle
+                .join("ric/node_modules/aws-lambda-ric/rapid-client.node")
+                .is_file()
+        } else {
+            // Un .so presente puede pertenecer a otra ABI de CPython. Importar
+            // con el intérprete empaquetado muestra el error que el RIC oculta.
+            let output = std::process::Command::new(bundle.join("bin/python3"))
+                .env_clear()
+                .env("PYTHONPATH", bundle.join("ric"))
+                .args(["-c", "import runtime_client"])
+                .output()
+                .expect("ejecutar el Python del bundle");
+            assert!(
+                output.status.success(),
+                "RIC incompatible con el Python del bundle: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            bundle.join("ric/awslambdaric").is_dir()
+        };
+        assert!(native, "el carril Linux requiere el RIC nativo real");
+    }
     bundle.join("bootstrap").is_file().then_some(root)
 }
 
 /// ZIP de una función Node: `index.js` con un handler que hace eco del evento.
 fn build_node_zip() -> Vec<u8> {
-    let src = br#"exports.handler = async (event) => ({ echoed: event, pid: process.pid });"#;
+    let src = br#"
+exports.handler = async (event, context) => {
+  if (event.fail) throw new Error("handler failure");
+  const before = context.getRemainingTimeInMillis();
+  await new Promise(resolve => setTimeout(resolve, event.sleep_ms || 50));
+  return { echoed: event, pid: process.pid, request_id: context.awsRequestId,
+    arn: context.invokedFunctionArn, before, remaining: context.getRemainingTimeInMillis() };
+};"#;
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut zw = zip::ZipWriter::new(&mut cursor);
@@ -384,12 +426,23 @@ async fn python_invoke_end_to_end() {
         panic!("esperaba Success en la 2ª invocación");
     };
     let json2: Value = serde_json::from_slice(&body2).expect("respuesta JSON 2");
-    assert_eq!(json["pid"], json2["pid"], "warm reuse: mismo pid");
+    assert_runtime_contract(&invoker, "lambda_function", &json, &json2).await;
 }
 
 /// ZIP de una función Python: `lambda_function.py` con un handler que hace eco.
 fn build_python_zip() -> Vec<u8> {
-    let src = b"import os\n\ndef handler(event, context):\n    return {\"echoed\": event, \"pid\": os.getpid()}\n";
+    let src = br#"import os
+import time
+
+def handler(event, context):
+    if event.get("fail"):
+        raise ValueError("handler failure")
+    before = context.get_remaining_time_in_millis()
+    time.sleep(event.get("sleep_ms", 50) / 1000)
+    return {"echoed": event, "pid": os.getpid(), "request_id": context.aws_request_id,
+            "arn": context.invoked_function_arn, "before": before,
+            "remaining": context.get_remaining_time_in_millis()}
+"#;
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut zw = zip::ZipWriter::new(&mut cursor);
@@ -403,3 +456,104 @@ fn build_python_zip() -> Vec<u8> {
 }
 
 const PROVIDED: &str = "provided.al2023";
+
+#[cfg(unix)]
+#[tokio::test]
+async fn timeout_y_cancelacion_terminan_hijos_y_permiten_reintento() {
+    for cancel in [false, true] {
+        let invoker = setup_with_names(PROVIDED, build_zip(), &["echo", "other"]).await;
+        let mut first = Vec::new();
+        for name in ["echo", "other"] {
+            let InvokeOutcome::Success(body) = invoker
+                .invoke(name, br#"{"spawn_child":true}"#)
+                .await
+                .unwrap()
+            else {
+                panic!("Success")
+            };
+            first.push(serde_json::from_slice::<Value>(&body).unwrap());
+        }
+        let start = std::time::Instant::now();
+        let call = invoker.invoke("echo", br#"{"sleep_ms":8000}"#);
+        if cancel {
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(150), call)
+                    .await
+                    .is_err()
+            );
+        } else {
+            let InvokeOutcome::FunctionError(body) = call.await.unwrap() else {
+                panic!("FunctionError")
+            };
+            assert_eq!(
+                serde_json::from_slice::<Value>(&body).unwrap()["errorType"],
+                "Sandbox.Timedout"
+            );
+            assert!(start.elapsed() >= std::time::Duration::from_secs(3));
+            assert!(start.elapsed() < std::time::Duration::from_secs(6));
+        }
+        processes::assert_exited(first[0]["pid"].as_u64().unwrap() as u32).await;
+        processes::assert_exited(first[0]["child_pid"].as_u64().unwrap() as u32).await;
+        assert!(processes::running(first[1]["child_pid"].as_u64().unwrap() as u32).await);
+        for (i, name) in ["echo", "other"].into_iter().enumerate() {
+            let InvokeOutcome::Success(body) = invoker.invoke(name, b"{}").await.unwrap() else {
+                panic!("Success")
+            };
+            let next: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(next["count"], i + 1);
+            assert_eq!(next["pid"] == first[i]["pid"], i == 1);
+            invoker.invalidate_function(name).await.unwrap();
+        }
+        processes::assert_exited(first[1]["child_pid"].as_u64().unwrap() as u32).await;
+    }
+}
+
+async fn assert_runtime_contract(invoker: &Invoker, name: &str, first: &Value, second: &Value) {
+    assert_eq!(first["pid"], second["pid"], "warm reuse");
+    assert_ne!(first["request_id"], second["request_id"]);
+    for response in [first, second] {
+        assert_eq!(
+            response["arn"],
+            format!("arn:aws:lambda:us-test-1:123456789012:function:{name}")
+        );
+        let before = response["before"]
+            .as_u64()
+            .expect("remaining time numérico");
+        let remaining = response["remaining"].as_u64().unwrap();
+        assert!(before > 0 && before <= 3000, "{response}");
+        assert!(remaining > 0 && remaining < before, "{response}");
+        assert!(!response["request_id"].as_str().unwrap().is_empty());
+    }
+    let InvokeOutcome::FunctionError(body) =
+        invoker.invoke(name, br#"{"fail":true}"#).await.unwrap()
+    else {
+        panic!("handler error")
+    };
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["errorMessage"],
+        "handler failure"
+    );
+    let InvokeOutcome::Success(body) = invoker.invoke(name, b"{}").await.unwrap() else {
+        panic!("warm after handler error")
+    };
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["pid"],
+        first["pid"]
+    );
+    let InvokeOutcome::FunctionError(body) =
+        invoker.invoke(name, br#"{"sleep_ms":8000}"#).await.unwrap()
+    else {
+        panic!("timeout")
+    };
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["errorType"],
+        "Sandbox.Timedout"
+    );
+    let InvokeOutcome::Success(body) = invoker.invoke(name, b"{}").await.unwrap() else {
+        panic!("reset after timeout")
+    };
+    let next: Value = serde_json::from_slice(&body).unwrap();
+    assert_ne!(next["pid"], first["pid"]);
+    assert_ne!(next["request_id"], second["request_id"]);
+    invoker.invalidate_function(name).await.unwrap();
+}
