@@ -93,7 +93,10 @@ LICENSES/         licencia por componente (interpreter, RIC, bootstrap)
   fuente). Desde un host que no es el target, `xtask` los ensambla dentro de un
   contenedor del target (`node:22-bookworm` / `python:3.13-bookworm`, Docker
   build-time §17); el único paso que corre en Docker es esa instalación del RIC.
-  En un host Linux nativo se instala directamente (npm / pip3), lo que exige el
+  Python usa **siempre** `python:3.13-bookworm`, incluso en un host Linux nativo:
+  el `pip3` del host podría instalar una extensión para otra ABI de CPython.
+  El E2E importa `runtime_client` con el intérprete del bundle antes de invocar.
+  Node se instala directamente con npm en un host Linux nativo, lo que exige el
   toolchain de C + libcurl en el host.
 - **macOS (`darwin-arm64`)**: el RIC de AWS **no compila limpio en macOS**. Los
   bundles dev usan un cliente del Runtime API propio (`dev-runtime.mjs` /

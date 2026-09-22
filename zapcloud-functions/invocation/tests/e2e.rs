@@ -333,11 +333,20 @@ fn installed_bundle_root(prefix: &str) -> Option<PathBuf> {
                 .join("ric/node_modules/aws-lambda-ric/rapid-client.node")
                 .is_file()
         } else {
+            // Un .so presente puede pertenecer a otra ABI de CPython. Importar
+            // con el intérprete empaquetado muestra el error que el RIC oculta.
+            let output = std::process::Command::new(bundle.join("bin/python3"))
+                .env_clear()
+                .env("PYTHONPATH", bundle.join("ric"))
+                .args(["-c", "import runtime_client"])
+                .output()
+                .expect("ejecutar el Python del bundle");
+            assert!(
+                output.status.success(),
+                "RIC incompatible con el Python del bundle: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             bundle.join("ric/awslambdaric").is_dir()
-                && std::fs::read_dir(bundle.join("ric")).unwrap().any(|entry| {
-                    let name = entry.unwrap().file_name().to_string_lossy().into_owned();
-                    name.starts_with("runtime_client.") && name.ends_with(".so")
-                })
         };
         assert!(native, "el carril Linux requiere el RIC nativo real");
     }
