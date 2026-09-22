@@ -71,7 +71,7 @@ por `oci_digest` + `tree_sha256`), y `zapcloud runtimes install` / el preflight 
 los bajan verificando digest e integridad antes de un rename atómico. Solo se distribuye el
 carril Linux; los bundles darwin siguen siendo dev-only. El índice ya contiene publicaciones,
 pero el paso sigue parcial: `ensure` aún no aplica de forma fiable cambios de pin, rollback o
-reparación, el merge matricial puede perder una actualización y una instalación desde un
+reparación y una instalación desde un
 binario sin índice local no tiene cómo descubrir qué descargar. La paridad RIC Linux tampoco
 está demostrada.
 
@@ -192,6 +192,19 @@ ZIP/env vars, async, response-size y paginación. Este avance no cierra el gate 
 
 Validación: [66 comprobaciones locales en Linux ARM64 y macOS](tests/evidence/golden-local.md).
 Pendiente acreditar el nuevo job de CI Linux x86_64 y la referencia AWS.
+
+**Publicación matricial (corregida; evidencia CI pendiente):** cada job publica en
+un índice temporal vacío y entrega un fragmento con una sola entrada
+`runtime × plataforma`. La unión aplica esas entradas sobre el índice base,
+preserva pins ajenos a la matriz, reemplaza entradas completas y rechaza snapshots
+completos o publicaciones duplicadas. El índice solo se reemplaza tras una unión
+exitosa. Se reutiliza `xtask publish --index`, sin modificar la publicación manual.
+
+Regresión reproducible: `python3 -B -m unittest discover -s tests/runtime_index -p 'test_*.py' -v`
+(Python 3 y `jq`). Los cinco tests ejecutan el filtro de producción con dos
+publicaciones desde la misma base, ambos órdenes, varias plataformas y entradas
+inválidas. El job `test` de CI ejecuta esta suite; falta enlazar su ejecución verde
+antes de acreditar el gate. Detalle: [distribución](docs/runtimes-distribution.md#4-flujo-de-ci).
 
 ---
 

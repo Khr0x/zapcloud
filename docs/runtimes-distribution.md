@@ -112,6 +112,27 @@ VOS: revisás los digests → merge
 6. FIN  (el merge toca solo index.json → no re-dispara: ver §6)
 ```
 
+Cada job de la matriz ejecuta `xtask publish --index` sobre un índice temporal
+vacío y sube **solo la entrada publicada** (`runtime × plataforma`). No sube una
+copia completa del índice del checkout: esa copia contendría pins antiguos de
+los otros jobs y podría sobrescribir una publicación nueva al combinarse.
+
+`update-index` aplica los fragmentos sobre `runtimes/index.json` del checkout con
+[merge-runtime-index.jq](../.github/scripts/merge-runtime-index.jq). Reemplaza cada
+entrada completa, conserva las entradas no publicadas en esa ejecución y rechaza
+fragmentos vacíos, con varias entradas o con publicaciones duplicadas. Escribe
+primero un archivo temporal; solo reemplaza el índice si la unión termina bien.
+
+La regresión corre en el job `test` de CI, sin registry ni credenciales:
+
+```sh
+python3 -B -m unittest discover -s tests/runtime_index -p 'test_*.py' -v
+```
+
+Comprueba publicaciones de Node/Python desde la misma base, ambos órdenes de
+unión, plataformas de un mismo runtime, conservación de pins ajenos y rechazo
+del formato antiguo de snapshots completos. Requiere Python 3 y `jq`.
+
 ---
 
 ## 5. El gate de reproducibilidad (integridad ≠ reproducibilidad)

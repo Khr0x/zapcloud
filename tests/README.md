@@ -30,6 +30,17 @@ y el round-trip OCI usan `#[ignore = "motivo"]`: Cargo los reporta como `ignored
 y el resumen de CI enumera sus prerrequisitos. No cuentan como pruebas aprobadas.
 Al ejecutarlos explícitamente, un prerrequisito ausente hace fallar la prueba.
 
+El mismo job `test` ejecuta la regresión de publicación matricial con Python 3 y
+`jq`, usando el filtro real de `runtimes.yml`:
+
+```sh
+python3 -B -m unittest discover -s tests/runtime_index -p 'test_*.py' -v
+```
+
+Simula dos publicaciones desde el mismo índice base y verifica que sobreviven
+ambos pins, independientemente del orden, junto con las entradas no publicadas.
+También rechaza snapshots completos, duplicados y fragmentos mal formados.
+
 ## Pruebas con prerrequisitos externos
 
 Los E2E Node/Python requieren bundles del host; en macOS usan `dev-runtime` y no

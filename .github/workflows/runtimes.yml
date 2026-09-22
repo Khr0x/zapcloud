@@ -28,12 +28,14 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "runtimes/index.json"
+      - ".github/scripts/merge-runtime-index.jq"
       - ".github/workflows/runtimes.yml"
   push:
     branches: [main]
     paths:
       - "xtask/**"
       - "zapcloud-functions/runtime/**"
+      - ".github/scripts/merge-runtime-index.jq"
       - ".github/workflows/runtimes.yml"
 
 permissions:
@@ -125,15 +127,19 @@ jobs:
       # Reintento: la subida del blob a ghcr sufre timeouts de red transitorios
       # (os error 110) en runners de Actions. El push OCI es idempotente por
       # digest (los blobs ya subidos se saltan), así que reintentar es seguro.
-      - name: Publicar en ghcr.io + actualizar índice
+      - name: Publicar en ghcr.io + generar fragmento de índice
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ZAPCLOUD_OCI_REGISTRY: ghcr.io/${{ github.repository }}
         run: |
+          # Cada job publica una sola entrada, sin copiar pins antiguos de otros jobs.
+          mkdir -p "$RUNNER_TEMP/runtime-index"
+          echo '{}' > "$RUNNER_TEMP/runtime-index/index.json"
           for i in 1 2 3; do
-            if cargo run -p xtask -- publish --runtime "${{ matrix.runtime }}" --target "$TARGET"; then
+            if cargo run -p xtask -- publish --runtime "${{ matrix.runtime }}" --target "$TARGET" \
+              --index "$RUNNER_TEMP/runtime-index/index.json"; then
               exit 0
             fi
             echo "::warning::publish falló (intento $i/3); reintentando en $((i*15))s…"
@@ -153,7 +159,8 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: index-${{ matrix.runtime }}-${{ matrix.arch }}
-          path: runtimes/index.json
+          path: ${{ runner.temp }}/runtime-index/index.json
+          if-no-files-found: error
 
   # Agrega los fragmentos de índice de todas las plataformas y abre/actualiza un
   # PR con el `runtimes/index.json` resultante (lockfile de distribución, §17).
@@ -170,9 +177,10 @@ jobs:
           path: fragments
       - name: Merge determinista de fragmentos
         run: |
-          # `*` hace deep-merge de objetos: los mapas por-runtime se combinan.
-          jq -s 'reduce .[] as $x ({}; . * $x)' fragments/index-*/index.json \
-            > runtimes/index.json
+          # Preserva entradas ajenas a esta matriz; rechaza fragmentos completos o duplicados.
+          jq -e -S -s -f .github/scripts/merge-runtime-index.jq \
+            runtimes/index.json fragments/index-*/index.json > runtimes/index.json.tmp
+          mv runtimes/index.json.tmp runtimes/index.json
           jq . runtimes/index.json
 
       # App token (no el GITHUB_TOKEN): un PR abierto con el token por defecto NO
