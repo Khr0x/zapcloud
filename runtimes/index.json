@@ -15,7 +15,7 @@
       "pbs_release": "20260825",
       "tree_sha256": "7567962a9e6ae33e187f8c83d7f2d35173431cad5e7a96f244c2b7d5a969cbb4",
       "oci_ref": "ghcr.io/khr0x/zapcloud/runtime-python:3.13-amd64",
-      "oci_digest": "sha256:fa1ad25b9ba385aac40557e5e50413217ac6f2434934c64acd1d0884a122ac71"
+      "oci_digest": "sha256:286663ad0f8909e017568966520921c1bc409a77019f8d579e1c41dfaa847f08"
     }
   }
 }
