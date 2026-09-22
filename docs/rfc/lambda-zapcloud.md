@@ -1,7 +1,8 @@
 # Lambda Self-Hosted Compatible Runtime
-## RFC técnico para un runtime de funciones compatible con AWS Lambda, ligero, self-hosted y production-first
+## RFC técnico para un runtime de funciones compatible con AWS Lambda, ligero y self-hosted, con objetivo production-first
 
-**Estado:** Propuesta / RFC inicial  
+**Estado:** Diseño vigente; implementación parcial (walking skeleton + v0.1.1 en estabilización)
+**Hito actual:** v0.1.2 **Stabilization** es obligatorio antes de continuar con el paso 12 del roadmap.
 **Licencia sugerida:** `Apache-2.0` (servidor y clientes)  
 **Lenguaje principal sugerido:** Rust  
 **Arquitecturas objetivo:** Linux AMD64 / ARM64  
@@ -2807,6 +2808,7 @@ Esfuerzo aproximado por milestone (semanas-persona de trabajo enfocado, muy apro
 | Milestone | Estimación | Riesgo |
 |---|---:|---|
 | v0.1 walking skeleton | 6–10 sem | bajo |
+| v0.1.2 stabilization | 2–4 sem | **alto (compatibilidad/seguridad)** |
 | v0.2 sandbox | 10–16 sem | **alto (seguridad)** |
 | v0.3 async | 4–8 sem | medio |
 | v0.4 versions/aliases | 3–5 sem | bajo |
@@ -2861,7 +2863,18 @@ SigV4 mínimo (verificar firma, sin policies)
 
 Fuera de v0.1 (entran después): Node/Python (v0.1.1), warm pool, async, versions, OCI, WASM.
 
-El objetivo de v0.1 no es "usable", es **demostrar que `aws lambda create-function` + `invoke` funcionan end-to-end contra el daemon** — valida o mata la tesis en semanas, no meses. Arranca forzado a `tenant_trust = "trusted"` y la documentación indica explícitamente que el código no está aislado.
+El objetivo de v0.1 no es "usable", es **demostrar que `aws lambda create-function` + `invoke` funcionan end-to-end contra el daemon** — valida o mata la tesis en semanas, no meses. Arranca forzado a `tenant_trust = "trusted"` y la documentación indica explícitamente que el código no está aislado. La evidencia actual es local; la paridad AWS se reserva para golden tests.
+
+## v0.1.2 — Stabilization (obligatorio antes del paso 12)
+
+Este hito no añade APIs. Cierra los riesgos que impedirían llamar completos a los pasos
+9–11: CI general sin skips silenciosos; Runtime API con headers/deadlines y E2E Linux con
+RIC reales; golden tests AWS CLI/SDK; desired-state, reparación y rollback de runtimes;
+merge seguro del índice; `auth=none` restringido a loopback, entorno hijo allowlisted y
+limpieza de grupos de procesos; semántica explícita para arquitectura, timeout, memoria y
+errores; lockfiles/hashes, imágenes fijadas y SBOM obligatorio; índice disponible desde una
+instalación nueva y operación mínima de GC/recuperación. La definición de terminado y la
+evidencia ejecutable viven en [`ROADMAP_MVP.md`](../../ROADMAP_MVP.md).
 
 ## v0.2 — Execution environments
 

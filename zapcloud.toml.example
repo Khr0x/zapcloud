@@ -22,8 +22,10 @@ prometheus = true
 
 # Distribución de runtime bundles (§17). La cache vive en `storage.runtimes`.
 [runtimes]
-# Registry OCI base de donde bajar los bundles (ghcr.io/<org>/zapcloud).
-registry = "ghcr.io/khrox20/zapcloud"
+# Registry OCI base documentado para los bundles publicados.
+# Nota: hasta v0.1.2 la autoridad efectiva es `oci_ref` de runtimes/index.json;
+# este campo aún no altera el origen de descarga.
+registry = "ghcr.io/khr0x/zapcloud"
 # Runtimes a asegurar en el preflight de `serve` (si ensure_on_start = true).
 preinstall = []
 # Bajar los `preinstall` ausentes al arrancar `serve` (antes de escuchar).

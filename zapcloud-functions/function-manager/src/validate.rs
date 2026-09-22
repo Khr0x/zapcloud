@@ -314,10 +314,12 @@ mod tests {
         assert!(validate_deployment_zip(&zip(&[("index.js", b"ok")]), "nodejs22.x").is_ok());
         assert!(validate_deployment_zip(&zip(&[("bootstrap", b"ok")]), "nodejs22.x").is_ok());
         // Límites y seguridad aplican a todos los runtimes.
-        assert!(
-            validate_deployment_zip_with_limit(&zip(&[("bootstrap", b"1234")]), "provided.al2023", 3)
-                .is_err()
-        );
+        assert!(validate_deployment_zip_with_limit(
+            &zip(&[("bootstrap", b"1234")]),
+            "provided.al2023",
+            3
+        )
+        .is_err());
         assert!(validate_deployment_zip(b"no-es-zip", "nodejs22.x").is_err());
         assert!(validate_deployment_zip(&zip(&[("../x.js", b"bad")]), "nodejs22.x").is_err());
     }

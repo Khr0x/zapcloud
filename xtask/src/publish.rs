@@ -33,7 +33,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
             "--target" => target = Some(it.next().context("--target requiere un valor")?),
             "--registry" => registry = Some(it.next().context("--registry requiere un valor")?),
             "--out" => out = PathBuf::from(it.next().context("--out requiere un valor")?),
-            "--index" => index_path = Some(PathBuf::from(it.next().context("--index requiere valor")?)),
+            "--index" => {
+                index_path = Some(PathBuf::from(it.next().context("--index requiere valor")?))
+            }
             other => bail!("flag desconocido: {other}"),
         }
     }
@@ -85,15 +87,19 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let mut idx = index::load(&index_path)?;
     index::upsert(&mut idx, &runtime, &platform, entry);
     index::save(&index_path, &idx)?;
-    eprintln!("    índice actualizado: {} [{runtime} {platform}]", index_path.display());
+    eprintln!(
+        "    índice actualizado: {} [{runtime} {platform}]",
+        index_path.display()
+    );
     Ok(())
 }
-
 
 /// `"linux-arm64"` → `("linux","arm64")`. Sin `--target`, usa el host.
 fn parse_target(target: Option<&str>) -> Result<(&'static str, &'static str)> {
     let (os, arch) = match target {
-        Some(s) => s.split_once('-').with_context(|| format!("target inválido '{s}'"))?,
+        Some(s) => s
+            .split_once('-')
+            .with_context(|| format!("target inválido '{s}'"))?,
         None => return zc_runtime::host_os_arch().map_err(|e| anyhow::anyhow!("{e}")),
     };
     let os = match os {

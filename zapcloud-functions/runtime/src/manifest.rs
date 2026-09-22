@@ -152,10 +152,8 @@ mod tests {
     /// Ensambla un bundle mínimo válido (bootstrap + manifest coherente) en un
     /// dir temporal y devuelve su ruta.
     fn fake_bundle(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "zc-runtime-manifest-{}-{tag}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("zc-runtime-manifest-{}-{tag}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         write(&dir.join("bootstrap"), b"#!/bin/sh\nexec node\n");
         write(&dir.join("bin/node"), b"ELF-fake");

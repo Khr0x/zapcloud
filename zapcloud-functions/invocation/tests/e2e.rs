@@ -223,18 +223,19 @@ async fn nodejs_sin_bundle_es_runtime_unavailable() {
         .invoke("echo", b"{}")
         .await
         .expect_err("RuntimeUnavailable sin bundle");
-    assert!(matches!(err, InvocationError::RuntimeUnavailable(_)), "{err}");
+    assert!(
+        matches!(err, InvocationError::RuntimeUnavailable(_)),
+        "{err}"
+    );
 }
 
 /// e2e real de Node: requiere el bundle ensamblado por
-/// `cargo run -p xtask -- bundle --runtime nodejs22.x`. Si no está presente,
-/// el test se salta (no todos los entornos lo tienen construido).
+/// `cargo run -p xtask -- bundle --runtime nodejs22.x` y ejecución con `--ignored`.
 #[tokio::test]
+#[ignore = "requiere bundle nodejs22 del host; ver tests/README.md"]
 async fn nodejs_invoke_end_to_end() {
-    let Some(runtimes_root) = installed_bundle_root("nodejs22") else {
-        eprintln!("SKIP nodejs_invoke_end_to_end: bundle nodejs22 no instalado");
-        return;
-    };
+    let runtimes_root =
+        installed_bundle_root("nodejs22").expect("bundle nodejs22 del host no instalado");
 
     // Función "index" → handler "index.handler" → index.js del ZIP.
     let invoker = setup_full("nodejs22.x", build_node_zip(), &["index"], runtimes_root).await;
@@ -250,7 +251,10 @@ async fn nodejs_invoke_end_to_end() {
     assert_eq!(json["echoed"]["ping"], 42, "respuesta: {json}");
 
     // Reuso warm: 2ª invocación sobre el mismo proceso (mismo pid).
-    let out2 = invoker.invoke("index", br#"{"ping":7}"#).await.expect("invoke 2");
+    let out2 = invoker
+        .invoke("index", br#"{"ping":7}"#)
+        .await
+        .expect("invoke 2");
     let InvokeOutcome::Success(body2) = out2 else {
         panic!("esperaba Success en la 2ª invocación");
     };
@@ -301,22 +305,28 @@ async fn python_sin_bundle_es_runtime_unavailable() {
         .invoke("echo", b"{}")
         .await
         .expect_err("RuntimeUnavailable sin bundle");
-    assert!(matches!(err, InvocationError::RuntimeUnavailable(_)), "{err}");
+    assert!(
+        matches!(err, InvocationError::RuntimeUnavailable(_)),
+        "{err}"
+    );
 }
 
 /// e2e real de Python: requiere el bundle ensamblado por
-/// `cargo run -p xtask -- bundle --runtime python3.13`. Si no está presente,
-/// el test se salta (no todos los entornos lo tienen construido).
+/// `cargo run -p xtask -- bundle --runtime python3.13` y ejecución con `--ignored`.
 #[tokio::test]
+#[ignore = "requiere bundle python313 del host; ver tests/README.md"]
 async fn python_invoke_end_to_end() {
-    let Some(runtimes_root) = installed_bundle_root("python313") else {
-        eprintln!("SKIP python_invoke_end_to_end: bundle python313 no instalado");
-        return;
-    };
+    let runtimes_root =
+        installed_bundle_root("python313").expect("bundle python313 del host no instalado");
 
     // Función "lambda_function" → handler "lambda_function.handler".
-    let invoker =
-        setup_full("python3.13", build_python_zip(), &["lambda_function"], runtimes_root).await;
+    let invoker = setup_full(
+        "python3.13",
+        build_python_zip(),
+        &["lambda_function"],
+        runtimes_root,
+    )
+    .await;
 
     let out = invoker
         .invoke("lambda_function", br#"{"ping":42}"#)
@@ -347,7 +357,8 @@ fn build_python_zip() -> Vec<u8> {
     {
         let mut zw = zip::ZipWriter::new(&mut cursor);
         let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
-        zw.start_file("lambda_function.py", opts).expect("start_file");
+        zw.start_file("lambda_function.py", opts)
+            .expect("start_file");
         zw.write_all(src).expect("write lambda_function.py");
         zw.finish().expect("finish zip");
     }

@@ -126,9 +126,18 @@ enum Arch {
 /// Combinaciones que produce `--all` (§16: darwin-arm64 nativo hoy; los Linux
 /// son los targets reales, ensamblados en/para Linux — ver Riesgos del plan).
 const ALL_TARGETS: &[Target] = &[
-    Target { os: Os::Darwin, arch: Arch::Arm64 },
-    Target { os: Os::Linux, arch: Arch::X86_64 },
-    Target { os: Os::Linux, arch: Arch::Arm64 },
+    Target {
+        os: Os::Darwin,
+        arch: Arch::Arm64,
+    },
+    Target {
+        os: Os::Linux,
+        arch: Arch::X86_64,
+    },
+    Target {
+        os: Os::Linux,
+        arch: Arch::Arm64,
+    },
 ];
 
 impl Os {
@@ -192,7 +201,12 @@ impl Target {
 
     /// Nombre del directorio del bundle: `<familia>-<os>-<arch>`.
     fn dir_name(self, family: Family) -> String {
-        format!("{}-{}-{}", family.dir_prefix(), self.os.as_str(), self.arch.as_str())
+        format!(
+            "{}-{}-{}",
+            family.dir_prefix(),
+            self.os.as_str(),
+            self.arch.as_str()
+        )
     }
 }
 
@@ -235,7 +249,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
 
     for target in targets {
-        eprintln!("==> ensamblando {} ({})", family.runtime(), target.dir_name(family));
+        eprintln!(
+            "==> ensamblando {} ({})",
+            family.runtime(),
+            target.dir_name(family)
+        );
         assemble(family, target, &out)?;
     }
     Ok(())
@@ -344,13 +362,18 @@ fn place_interpreter(family: Family, interp: &InterpreterDist, bundle_dir: &Path
     match family {
         Family::Node => {
             copy_tree(&interp.root.join("bin"), &bundle_dir.join("bin"))?;
-            fs::copy(interp.root.join("LICENSE"), bundle_dir.join("LICENSES/interpreter.LICENSE"))
-                .context("copiando LICENSE de Node")?;
+            fs::copy(
+                interp.root.join("LICENSE"),
+                bundle_dir.join("LICENSES/interpreter.LICENSE"),
+            )
+            .context("copiando LICENSE de Node")?;
         }
         Family::Python => {
             // El tarball install_only es reubicable: su contenido va a la raíz.
             copy_tree(&interp.root, bundle_dir)?;
-            let license = interp.root.join(format!("lib/python{PYTHON_MM}/LICENSE.txt"));
+            let license = interp
+                .root
+                .join(format!("lib/python{PYTHON_MM}/LICENSE.txt"));
             fs::copy(&license, bundle_dir.join("LICENSES/interpreter.LICENSE"))
                 .with_context(|| format!("copiando LICENSE de CPython ({license:?})"))?;
         }
@@ -573,8 +596,13 @@ fn download_node(target: Target, work: &Path) -> Result<InterpreterDist> {
     let bytes = download_verified(&format!("{base}/{tarball}"), &expected, &tarball)?;
     let tarball_path = work.join(&tarball);
     fs::write(&tarball_path, &bytes)?;
-    run_cmd(Command::new("tar").arg("-xzf").arg(&tarball_path).current_dir(work))
-        .context("extrayendo el tarball de Node")?;
+    run_cmd(
+        Command::new("tar")
+            .arg("-xzf")
+            .arg(&tarball_path)
+            .current_dir(work),
+    )
+    .context("extrayendo el tarball de Node")?;
 
     Ok(InterpreterDist {
         root: work.join(&name),
@@ -586,8 +614,9 @@ fn download_python(target: Target, work: &Path) -> Result<InterpreterDist> {
     let triple = python_triple(target);
     let name = format!("cpython-{PYTHON_VERSION}+{PBS_RELEASE}-{triple}-install_only");
     let tarball = format!("{name}.tar.gz");
-    let base =
-        format!("https://github.com/astral-sh/python-build-standalone/releases/download/{PBS_RELEASE}");
+    let base = format!(
+        "https://github.com/astral-sh/python-build-standalone/releases/download/{PBS_RELEASE}"
+    );
 
     // Sha esperado desde SHA256SUMS de la release (mismo formato `<hash>  <file>`).
     let shasums = http_get_text(&format!("{base}/SHA256SUMS"))?;
@@ -597,8 +626,13 @@ fn download_python(target: Target, work: &Path) -> Result<InterpreterDist> {
     let bytes = download_verified(&format!("{base}/{tarball}"), &expected, &tarball)?;
     let tarball_path = work.join(&tarball);
     fs::write(&tarball_path, &bytes)?;
-    run_cmd(Command::new("tar").arg("-xzf").arg(&tarball_path).current_dir(work))
-        .context("extrayendo el tarball de CPython")?;
+    run_cmd(
+        Command::new("tar")
+            .arg("-xzf")
+            .arg(&tarball_path)
+            .current_dir(work),
+    )
+    .context("extrayendo el tarball de CPython")?;
 
     // El tarball install_only extrae a `python/`.
     Ok(InterpreterDist {
@@ -697,15 +731,17 @@ fn install_ric_node(work: &Path, target: Target, via_docker: bool) -> Result<Ric
 
     // SBOM CycloneDX del árbol npm (npm >= 9). El camino Docker ya lo dejó en
     // proj/sbom.cdx.json; si no, se genera en el host. Best-effort.
-    let sbom_cyclonedx = fs::read_to_string(proj.join("sbom.cdx.json")).ok().or_else(|| {
-        Command::new("npm")
-            .args(["sbom", "--sbom-format", "cyclonedx"])
-            .current_dir(&proj)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-    });
+    let sbom_cyclonedx = fs::read_to_string(proj.join("sbom.cdx.json"))
+        .ok()
+        .or_else(|| {
+            Command::new("npm")
+                .args(["sbom", "--sbom-format", "cyclonedx"])
+                .current_dir(&proj)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        });
 
     Ok(RicInstall {
         src: proj.join("node_modules"),
@@ -716,11 +752,7 @@ fn install_ric_node(work: &Path, target: Target, via_docker: bool) -> Result<Ric
     })
 }
 
-fn install_ric_python(
-    work: &Path,
-    target: Target,
-    via_docker: bool,
-) -> Result<Option<RicInstall>> {
+fn install_ric_python(work: &Path, target: Target, via_docker: bool) -> Result<Option<RicInstall>> {
     // macOS: el RIC de AWS (extensión C contra libcurl) no compila limpio en
     // Darwin. El bundle dev corre solo con dev-runtime.py (§19).
     if target.os == Os::Darwin {
@@ -733,8 +765,11 @@ fn install_ric_python(
 
     // requirements.txt pinneado, versionado en el repo.
     let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join(Family::Python.assets_subdir());
-    fs::copy(assets.join("requirements.txt"), proj.join("requirements.txt"))
-        .context("copiando requirements.txt pinneado (xtask/assets/python313)")?;
+    fs::copy(
+        assets.join("requirements.txt"),
+        proj.join("requirements.txt"),
+    )
+    .context("copiando requirements.txt pinneado (xtask/assets/python313)")?;
 
     if via_docker {
         install_ric_python_docker(&proj, target)?;
@@ -888,8 +923,12 @@ fn python_sbom(ric_dir: Option<&Path>, interp_version: &str) -> Result<String> {
         for entry in fs::read_dir(ric).with_context(|| format!("leyendo {ric:?}"))? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(stem) = name.strip_suffix(".dist-info") else { continue };
-            let Some((pkg, ver)) = stem.rsplit_once('-') else { continue };
+            let Some(stem) = name.strip_suffix(".dist-info") else {
+                continue;
+            };
+            let Some((pkg, ver)) = stem.rsplit_once('-') else {
+                continue;
+            };
             let license =
                 dist_info_license(&entry.path()).unwrap_or_else(|| "NOASSERTION".to_string());
             pkgs.push((pkg.to_string(), ver.to_string(), license));
@@ -962,7 +1001,9 @@ fn awslambdaric_license(ric: &Path, version: &str) -> Option<PathBuf> {
 fn write_ric_license(family: Family, ric: Option<&RicInstall>, bundle_dir: &Path) -> Result<()> {
     let dst = bundle_dir.join("LICENSES/ric.LICENSE");
     match ric.and_then(|r| r.license_file.as_ref()) {
-        Some(lic) => fs::copy(lic, &dst).map(|_| ()).context("copiando LICENSE del RIC"),
+        Some(lic) => fs::copy(lic, &dst)
+            .map(|_| ())
+            .context("copiando LICENSE del RIC"),
         None => {
             let note = match family {
                 Family::Node => "aws-lambda-ric (RIC de AWS) es Apache-2.0.\n",
@@ -976,7 +1017,6 @@ fn write_ric_license(family: Family, ric: Option<&RicInstall>, bundle_dir: &Path
     }
 }
 
-
 fn read_pkg_version(pkg_json: &Path) -> Result<String> {
     #[derive(Deserialize)]
     struct Pkg {
@@ -988,10 +1028,7 @@ fn read_pkg_version(pkg_json: &Path) -> Result<String> {
 
 /// Primer fichero existente de una lista de candidatos, relativo a `dir`.
 fn first_existing(dir: &Path, candidates: &[&str]) -> Option<PathBuf> {
-    candidates
-        .iter()
-        .map(|f| dir.join(f))
-        .find(|p| p.is_file())
+    candidates.iter().map(|f| dir.join(f)).find(|p| p.is_file())
 }
 
 /// Copia recursiva preservando symlinks (`cp -R`); tanto npm (`.bin/`) como
@@ -999,8 +1036,13 @@ fn first_existing(dir: &Path, candidates: &[&str]) -> Option<PathBuf> {
 fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     // `cp -R src/. dst` copia el contenido de src dentro de dst.
-    run_cmd(Command::new("cp").arg("-R").arg(format!("{}/.", src.display())).arg(dst))
-        .with_context(|| format!("copiando {src:?} -> {dst:?}"))
+    run_cmd(
+        Command::new("cp")
+            .arg("-R")
+            .arg(format!("{}/.", src.display()))
+            .arg(dst),
+    )
+    .with_context(|| format!("copiando {src:?} -> {dst:?}"))
 }
 
 fn set_executable(path: &Path) -> Result<()> {
@@ -1035,13 +1077,17 @@ fn run_cmd(cmd: &mut Command) -> Result<()> {
 
 fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
     let resp = reqwest::blocking::get(url).with_context(|| format!("GET {url}"))?;
-    let resp = resp.error_for_status().with_context(|| format!("GET {url}"))?;
+    let resp = resp
+        .error_for_status()
+        .with_context(|| format!("GET {url}"))?;
     Ok(resp.bytes()?.to_vec())
 }
 
 fn http_get_text(url: &str) -> Result<String> {
     let resp = reqwest::blocking::get(url).with_context(|| format!("GET {url}"))?;
-    let resp = resp.error_for_status().with_context(|| format!("GET {url}"))?;
+    let resp = resp
+        .error_for_status()
+        .with_context(|| format!("GET {url}"))?;
     Ok(resp.text()?)
 }
 
@@ -1080,7 +1126,9 @@ mod tests {
         assert_eq!(t.dir_name(Family::Node), "nodejs22-darwin-arm64");
         assert_eq!(t.dir_name(Family::Python), "python313-darwin-arm64");
         assert_eq!(
-            Target::parse("linux-x86_64").unwrap().dir_name(Family::Python),
+            Target::parse("linux-x86_64")
+                .unwrap()
+                .dir_name(Family::Python),
             "python313-linux-x86_64"
         );
         assert_eq!(Target::parse("linux-x64").unwrap().arch, Arch::X86_64);

@@ -41,8 +41,14 @@ struct BundleSpec {
 
 fn bundle_spec(runtime: &str) -> Option<BundleSpec> {
     match runtime {
-        "nodejs22.x" => Some(BundleSpec { family_prefix: "nodejs22", interp_bin: "bin/node" }),
-        "python3.13" => Some(BundleSpec { family_prefix: "python313", interp_bin: "bin/python3" }),
+        "nodejs22.x" => Some(BundleSpec {
+            family_prefix: "nodejs22",
+            interp_bin: "bin/node",
+        }),
+        "python3.13" => Some(BundleSpec {
+            family_prefix: "python313",
+            interp_bin: "bin/python3",
+        }),
         _ => None,
     }
 }
@@ -114,7 +120,8 @@ fn verify_once(dir: &Path) -> Result<(), RuntimeError> {
             }
         }
     }
-    manifest::verify(dir).map_err(|e| RuntimeError::Integrity(format!("{}: {e}", dir.display())))?;
+    manifest::verify(dir)
+        .map_err(|e| RuntimeError::Integrity(format!("{}: {e}", dir.display())))?;
     VERIFIED
         .lock()
         .unwrap()
