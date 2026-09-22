@@ -70,7 +70,7 @@ pub fn oci_ref(registry_base: &str, runtime: &str, arch: &str) -> Result<String>
 
 /// Empaqueta el árbol del bundle como capa OCI (`tar.gz`), preservando symlinks
 /// y permisos para que el `tree_sha256` round-trip al desempaquetar.
-fn pack_bundle(bundle_dir: &Path) -> Result<Vec<u8>> {
+pub(crate) fn pack_bundle(bundle_dir: &Path) -> Result<Vec<u8>> {
     let buf = Vec::new();
     let enc = GzEncoder::new(buf, Compression::default());
     let mut tar = tar::Builder::new(enc);
@@ -155,10 +155,11 @@ pub async fn pull(
         .await
         .with_context(|| format!("pull OCI de {registry_ref}@{expected_digest}"))?;
 
-    if let Some(got) = image.digest.as_deref() {
-        if got != expected_digest {
-            bail!("digest OCI no coincide: esperado {expected_digest}, obtenido {got}");
-        }
+    if image.digest.as_deref() != Some(expected_digest) {
+        bail!(
+            "digest OCI no coincide: esperado {expected_digest}, obtenido {:?}",
+            image.digest
+        );
     }
     let layer = image
         .layers

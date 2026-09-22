@@ -29,5 +29,10 @@ oci-client = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Migración atómica del directorio legacy a una generación seleccionada por symlink.
+libc.workspace = true
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+axum.workspace = true

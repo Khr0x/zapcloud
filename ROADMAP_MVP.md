@@ -70,10 +70,11 @@ publican como OCI artifacts con `xtask publish` (push a ghcr + pin en `runtimes/
 por `oci_digest` + `tree_sha256`), y `zapcloud runtimes install` / el preflight de `serve`
 los bajan verificando digest e integridad antes de un rename atómico. Solo se distribuye el
 carril Linux; los bundles darwin siguen siendo dev-only. El índice ya contiene publicaciones,
-pero el paso sigue parcial: `ensure` aún no aplica de forma fiable cambios de pin, rollback o
-reparación y una instalación desde un
-binario sin índice local no tiene cómo descubrir qué descargar. La paridad RIC Linux tampoco
-está demostrada.
+pero el paso sigue parcial: una instalación desde un binario sin índice local no
+tiene cómo descubrir qué descargar y faltan GC/cuotas. `ensure` ya compara pins,
+repara corrupción y activa generaciones para upgrade/rollback; falta acreditar
+este cambio en CI. El subset Runtime API tiene evidencia RIC Linux, sin acreditar
+paridad AWS completa (ver gates de v0.1.2).
 
 ---
 
@@ -193,7 +194,7 @@ ZIP/env vars, async, response-size y paginación. Este avance no cierra el gate 
 Validación: [66 comprobaciones locales en Linux ARM64 y macOS](tests/evidence/golden-local.md).
 Pendiente acreditar el nuevo job de CI Linux x86_64 y la referencia AWS.
 
-**Publicación matricial (corregida; evidencia CI pendiente):** cada job publica en
+**Publicación matricial (gate acreditado):** cada job publica en
 un índice temporal vacío y entrega un fragmento con una sola entrada
 `runtime × plataforma`. La unión aplica esas entradas sobre el índice base,
 preserva pins ajenos a la matriz, reemplaza entradas completas y rechaza snapshots
@@ -203,8 +204,25 @@ exitosa. Se reutiliza `xtask publish --index`, sin modificar la publicación man
 Regresión reproducible: `python3 -B -m unittest discover -s tests/runtime_index -p 'test_*.py' -v`
 (Python 3 y `jq`). Los cinco tests ejecutan el filtro de producción con dos
 publicaciones desde la misma base, ambos órdenes, varias plataformas y entradas
-inválidas. El job `test` de CI ejecuta esta suite; falta enlazar su ejecución verde
-antes de acreditar el gate. Detalle: [distribución](docs/runtimes-distribution.md#4-flujo-de-ci).
+inválidas. Evidencia: [CI verde de PR #19 en main](https://github.com/Khr0x/zapcloud/actions/runs/35772623288),
+[publicación exitosa](https://github.com/Khr0x/zapcloud/actions/runs/35772623087) y
+[CI del índice integrado por PR #20](https://github.com/Khr0x/zapcloud/actions/runs/35773749328).
+Los fragmentos Node/Python publicados coinciden con las dos entradas de PR #20.
+Detalle: [distribución](docs/runtimes-distribution.md#4-flujo-de-ci).
+
+**Runtime distribution (implementado; evidencia CI pendiente):** `ensure` exige
+el pin completo del índice, verifica la integridad e identidad del bundle y
+repara/actualiza mediante generaciones conservadas y un enlace activo atómico.
+Rollback offline reutiliza una generación íntegra del pin solicitado. Los errores
+de descarga o activación conservan la anterior; los instaladores se serializan con
+un lock del SO y se recupera staging abandonado. `resolve` fija rutas canónicas para
+que environments existentes no cambien de generación durante un upgrade.
+
+Regresión: `cargo test --locked -p zc-runtime --lib distribute::tests`, incorporada
+al test del workspace. Linux prueba también migración legacy y el cliente OCI real
+contra HTTP local. No acredita durabilidad ante pérdida eléctrica ni cierra GC/cuotas.
+Evidencia local: [Linux ARM64 y alcance](tests/evidence/runtime-ensure-local.md).
+Operación y límites: [distribución](docs/runtimes-distribution.md#actualización-reparación-y-rollback).
 
 ---
 
