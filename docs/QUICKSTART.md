@@ -28,8 +28,28 @@ efectivos** — no ejecutes código no confiable).
 ## 2. Arrancar el daemon
 
 Usa el `zapcloud.toml.example` como base (escucha en `127.0.0.1:9000`, región `local-1`,
-auth `none`). **No cambies esa escucha a una interfaz pública mientras `auth=none` siga
-habilitado**; process mode ejecuta ZIPs con el usuario, filesystem, red y entorno del daemon.
+auth `none`). Con `auth=none` (también si omites `[auth]`), el arranque solo acepta
+loopback: `127.0.0.0/8` o `[::1]`. Rechaza `0.0.0.0`, `[::]` y direcciones de red,
+incluidas las privadas, antes de instalar runtimes, crear almacenamiento o escuchar.
+
+Solo para un laboratorio aislado, puedes añadir `allow_insecure_non_loopback = true`
+a `[auth]`. Es una excepción insegura y el arranque emite una advertencia: cualquier
+cliente con acceso puede ejecutar ZIPs con el usuario, filesystem y red del daemon.
+Para usar autenticación configura `mode = "sigv4"` y las variables `AWS_ACCESS_KEY_ID`
+y `AWS_SECRET_ACCESS_KEY` del servidor.
+
+Las funciones no heredan variables del daemon (incluidas credenciales AWS, tokens,
+`HOME`, proxies y opciones de Node/Python). El executor solo inyecta el contrato Lambda
+de §16 y un `PATH=/usr/bin:/bin` fijo; los bundles usan sus propios intérpretes y Python
+define su `PYTHONPATH` al arrancar. Esto evita la herencia de secretos, pero process/T1
+sigue compartiendo usuario y filesystem. `Environment.Variables` sigue pendiente.
+
+En Unix, cada environment arranca en su propio grupo de procesos. Destruirlo,
+invalidarlo tras actualizar/borrar la función o liberar el environment envía `SIGKILL`
+al grupo; la terminación explícita también espera y recolecta al bootstrap. Los hijos
+que permanezcan en el grupo terminan incluso si el bootstrap ya salió. Esto no cubre
+procesos que cambien deliberadamente de grupo/sesión ni un cierre forzado del daemon
+que impida ejecutar su limpieza; process/T1 sigue reservado para código confiable.
 
 ```bash
 cp zapcloud.toml.example zapcloud.toml

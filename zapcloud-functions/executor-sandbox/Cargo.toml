@@ -22,6 +22,9 @@ anyhow.workspace = true
 # El bootstrap (bin) es un cliente HTTP blocking del Runtime API.
 reqwest.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tokio.workspace = true
 serde_json.workspace = true

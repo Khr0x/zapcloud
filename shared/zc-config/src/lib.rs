@@ -93,6 +93,10 @@ impl Default for ExecutorConfig {
 pub struct AuthConfig {
     #[serde(default)]
     pub mode: AuthModeConfig,
+    /// Permite exponer la API sin autenticación fuera de loopback. Inseguro:
+    /// cualquier cliente con acceso puede ejecutar código con permisos del daemon.
+    #[serde(default)]
+    pub allow_insecure_non_loopback: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
@@ -107,6 +111,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             mode: AuthModeConfig::None,
+            allow_insecure_non_loopback: false,
         }
     }
 }
@@ -167,10 +172,19 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
-        self.server
-            .listen
-            .parse::<SocketAddr>()
-            .map_err(|_| ConfigError::Invalid("server.listen no es una dirección válida".into()))?;
+        let listen = self.listen()?;
+        if self.auth.mode == AuthModeConfig::None
+            && !listen.ip().is_loopback()
+            && !self.auth.allow_insecure_non_loopback
+        {
+            return Err(ConfigError::Invalid(
+                "auth.mode=none exige server.listen en loopback (127.0.0.0/8 o ::1); \
+                 usa auth.mode=sigv4 o habilita explícitamente \
+                 auth.allow_insecure_non_loopback=true (inseguro: permite ejecutar código \
+                 sin autenticación con los permisos del daemon)"
+                    .into(),
+            ));
+        }
         if self.server.region.is_empty()
             || !self
                 .server
@@ -262,6 +276,56 @@ tenant_trust = "trusted"
         assert_eq!(config.server.listen, "127.0.0.1:9000");
         assert_eq!(config.server.region, "local-1");
         assert_eq!(config.auth.mode, AuthModeConfig::None);
+        assert!(!config.auth.allow_insecure_non_loopback);
+    }
+
+    #[test]
+    fn auth_none_exige_loopback_salvo_opt_in() {
+        for (auth, permite_no_loopback) in [
+            ("", false),
+            ("[auth]\nmode = 'none'", false),
+            (
+                "[auth]\nmode = 'none'\nallow_insecure_non_loopback = false",
+                false,
+            ),
+            (
+                "[auth]\nmode = 'none'\nallow_insecure_non_loopback = true",
+                true,
+            ),
+            ("[auth]\nmode = 'sigv4'", true),
+        ] {
+            let mut config: Config = toml::from_str(&format!("{}\n{auth}", valid())).unwrap();
+            for (listen, loopback) in [
+                ("127.0.0.1:9000", true),
+                ("127.42.0.1:9000", true),
+                ("[::1]:9000", true),
+                ("0.0.0.0:9000", false),
+                ("[::]:9000", false),
+                ("192.168.1.2:9000", false),
+                ("10.0.0.1:9000", false),
+                ("169.254.1.2:9000", false),
+                ("203.0.113.1:9000", false),
+                ("[fe80::1]:9000", false),
+                ("[2001:db8::1]:9000", false),
+                ("[::ffff:192.168.1.2]:9000", false),
+                ("[::ffff:127.0.0.1]:9000", false),
+            ] {
+                config.server.listen = listen.into();
+                let result = config.validate();
+                assert_eq!(
+                    result.is_ok(),
+                    loopback || permite_no_loopback,
+                    "listen={listen}, auth={auth:?}: {result:?}"
+                );
+                if let Err(error) = result {
+                    assert!(error
+                        .to_string()
+                        .contains("auth.allow_insecure_non_loopback=true"));
+                }
+            }
+            config.server.listen = "not-an-address".into();
+            assert!(config.validate().is_err(), "el opt-in no evita el parseo");
+        }
     }
 
     #[test]

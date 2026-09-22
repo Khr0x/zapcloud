@@ -16,6 +16,9 @@ default = "process"
 
 [auth]
 mode = "none"
+# Sin autenticación solo se permite loopback (127.0.0.0/8 o ::1).
+# true permite ejecutar código sin autenticación desde la red: solo laboratorio aislado.
+allow_insecure_non_loopback = false
 
 [telemetry]
 prometheus = true

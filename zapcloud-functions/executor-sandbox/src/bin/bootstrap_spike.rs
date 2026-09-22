@@ -85,6 +85,12 @@ fn handle(event: &str, handler: &str) -> Result<String, String> {
         return Err("fallo solicitado por el evento".to_string());
     }
 
+    // Sonda del fixture para comprobar el entorno real del proceso hijo.
+    if parsed.get("inspect_env").and_then(|v| v.as_bool()) == Some(true) {
+        let environment: std::collections::BTreeMap<_, _> = env::vars().collect();
+        return Ok(serde_json::json!(environment).to_string());
+    }
+
     let out = serde_json::json!({
         "handled": parsed,
         "handler": handler,

@@ -75,10 +75,46 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Mata el proceso asociado mientras el environment permanece bajo su lock.
+    /// En Unix mata el grupo antes de recolectar al bootstrap; así también se
+    /// limpian hijos cuyo padre ya terminó. Se puede llamar más de una vez.
     pub async fn terminate(&mut self) -> Result<()> {
+        #[cfg(unix)]
+        self.kill_process_group()
+            .context("kill del grupo del bootstrap")?;
+        // kill también espera/recolecta al líder y cubre el caso en que este
+        // haya cambiado de grupo por su cuenta (process/T1 no es aislamiento).
         self.child.kill().await.context("kill del bootstrap")?;
         Ok(())
+    }
+
+    #[cfg(unix)]
+    fn kill_process_group(&self) -> std::io::Result<()> {
+        // No recolectar al líder antes de señalar el grupo: mientras conservamos
+        // su Child sin wait/try_wait, su PID no puede reutilizarse. Tras wait,
+        // id() es None, evitando señales duplicadas desde terminate o Drop.
+        let Some(pid) = self.child.id() else {
+            return Ok(());
+        };
+        // SAFETY: spawn crea PGID=PID con process_group(0); pid es positivo y
+        // pertenece a este Child aún no recolectado. No se pasan punteros.
+        if unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) } == -1 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Environment {
+    fn drop(&mut self) {
+        // Drop no puede esperar. Tokio recolecta al bootstrap al soltar Child;
+        // antes señalamos su grupo, también en cancelación o salida por error.
+        if let Err(error) = self.kill_process_group() {
+            eprintln!("[executor] no se pudo terminar el grupo del bootstrap: {error}");
+        }
     }
 }
 
@@ -180,8 +216,15 @@ impl ProcessExecutor {
     ///
     /// NOTA de honestidad (§16): las `Environment.Variables` de usuario NO se
     /// inyectan aquí — eso es el paso 13 (v0.1.1). Solo el contrato de sistema.
+    /// No se hereda ninguna variable del daemon: se permite únicamente este
+    /// contrato y un PATH fijo para los comandos de los bootstraps en shell.
     pub async fn create(&self, spec: &FunctionSpec) -> Result<Environment> {
-        let child = Command::new(&spec.bootstrap_path)
+        let mut command = Command::new(&spec.bootstrap_path);
+        #[cfg(unix)]
+        command.process_group(0);
+        let child = command
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
             // El código corre desde su raíz (§16 layout: /var/task).
             .current_dir(&spec.task_root)
             // Lo esencial: dónde hace poll el runtime (§16, §18).

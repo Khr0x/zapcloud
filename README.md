@@ -60,6 +60,11 @@ También puede usarse otro archivo con `cargo run -p zapcloud -- serve --config 
 (o `zapcloud serve` si el binario ya está instalado en `PATH`).
 
 En v0.1 la configuración debe declarar `tenant_trust = "trusted"` y
-`executor.default = "process"`. Este modo comparte usuario, filesystem, red y entorno
-con el daemon; `MemorySize` y `Timeout` aún no son fronteras de seguridad. No combines
-`auth.mode = "none"` con una escucha pública.
+`executor.default = "process"`. Este modo comparte usuario, filesystem y red con el
+daemon; `MemorySize` y `Timeout` aún no son fronteras de seguridad. Las funciones
+arrancan con un entorno vacío más el contrato Lambda y `PATH=/usr/bin:/bin`, sin heredar
+credenciales ni otras variables del daemon. En Unix, destruir, invalidar o liberar un
+environment termina su grupo de procesos, incluidos los hijos que sigan en ese grupo.
+Esto no aísla el acceso al filesystem ni impide que un proceso abandone el grupo. Con
+`auth.mode = "none"` el arranque rechaza direcciones fuera de loopback, salvo el opt-in
+inseguro `auth.allow_insecure_non_loopback = true` para laboratorios aislados.

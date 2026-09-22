@@ -2,8 +2,9 @@
 
 Pruebas a nivel de repo, no unitarias de crate.
 
-Estado actual: este directorio solo contiene esta guía. Las suites descritas abajo
-son entregables del roadmap, no pruebas que ya se ejecuten en un checkout limpio.
+Estado actual: este directorio contiene esta guía y helpers compartidos en `support/`.
+Las suites descritas abajo son entregables del roadmap, no pruebas que ya se ejecuten
+en un checkout limpio.
 
 - `golden/` — **golden compatibility tests** (§70): paridad medida contra AWS
   real/SDKs y AWS RIE. Hito obligatorio de v0.1.2; no marcar compatibilidad como

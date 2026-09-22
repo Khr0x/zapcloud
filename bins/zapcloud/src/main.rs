@@ -151,9 +151,16 @@ async fn run_serve(config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path)
         .with_context(|| format!("cargando configuración desde {}", config_path.display()))?;
     zc_telemetry::init();
+    let listen = config.listen()?;
+    if config.auth.mode == AuthModeConfig::None && !listen.ip().is_loopback() {
+        tracing::warn!(
+            %listen,
+            "auth.allow_insecure_non_loopback=true: API sin autenticación fuera de loopback; \
+             cualquier cliente con acceso puede ejecutar código con permisos del daemon"
+        );
+    }
     preflight_runtimes(&config).await;
     let app = build_app(&config).await?;
-    let listen = config.listen()?;
 
     let listener = TcpListener::bind(listen)
         .await
@@ -477,5 +484,39 @@ mod tests {
             PathBuf::from("custom.toml")
         );
         assert!(config_path(["--bad".into()].into_iter()).is_err());
+    }
+
+    #[tokio::test]
+    async fn serve_rechaza_auth_none_publico_antes_de_crear_storage() {
+        let root = std::env::temp_dir().join(format!(
+            "zapcloud-serve-auth-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let config_path = root.join("zapcloud.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "[server]\nlisten = '0.0.0.0:0'\n\
+                 [storage]\nmetadata = 'sqlite://{}/metadata.db'\nartifacts = '{}/artifacts'\n\
+                 [security]\ntenant_trust = 'trusted'\n",
+                root.display(),
+                root.display()
+            ),
+        )
+        .unwrap();
+
+        let error = tokio::time::timeout(std::time::Duration::from_secs(5), run_serve(config_path))
+            .await
+            .expect("serve debe rechazar la configuración antes de escuchar")
+            .expect_err("auth=none público debe fallar");
+        assert!(format!("{error:#}").contains("auth.mode=none exige server.listen en loopback"));
+        assert!(!root.join("artifacts").exists());
+        assert!(!root.join("metadata.db").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

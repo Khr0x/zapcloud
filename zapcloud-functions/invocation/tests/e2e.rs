@@ -13,6 +13,10 @@ use zc_artifact_store::ArtifactStore;
 use zc_invocation::{InvocationError, InvokeOutcome, Invoker};
 use zc_persistence::{Database, NewArtifact, NewFunction};
 
+#[cfg(unix)]
+#[path = "../../../tests/support/processes.rs"]
+mod processes;
+
 /// Directorio temporal único para este proceso de test.
 fn unique_tmp(tag: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -156,6 +160,39 @@ async fn invalidar_function_destruye_warm_y_fuerza_cold_start() {
         second["pid"], first["pid"],
         "el proceso anterior fue destruido"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalidar_termina_hijos_sin_afectar_otra_funcion() {
+    let invoker = setup_with_names(PROVIDED, build_zip(), &["echo", "other"]).await;
+    let mut responses = Vec::new();
+    for name in ["echo", "other"] {
+        let InvokeOutcome::Success(body) = invoker
+            .invoke(name, br#"{"spawn_child":true}"#)
+            .await
+            .unwrap()
+        else {
+            panic!("el fixture debe crear su hijo")
+        };
+        responses.push(serde_json::from_slice::<Value>(&body).unwrap());
+    }
+    let child = responses[0]["child_pid"].as_u64().unwrap() as u32;
+    let other_child = responses[1]["child_pid"].as_u64().unwrap() as u32;
+    assert!(processes::running(child).await);
+    assert!(processes::running(other_child).await);
+    invoker.invalidate_function("echo").await.unwrap();
+    processes::assert_exited(child).await;
+    processes::assert_exited(responses[0]["pid"].as_u64().unwrap() as u32).await;
+    assert!(processes::running(other_child).await);
+    let InvokeOutcome::Success(body) = invoker.invoke("other", b"{}").await.unwrap() else {
+        panic!("la otra función debe seguir respondiendo")
+    };
+    let other: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(other["pid"], responses[1]["pid"]);
+    assert_eq!(other["count"], 2);
+    invoker.invalidate_function("other").await.unwrap();
+    processes::assert_exited(other_child).await;
 }
 
 #[tokio::test]
