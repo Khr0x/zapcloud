@@ -749,6 +749,19 @@ Serialización de errores
   errorType / errorMessage / stackTrace, y errores no capturados
 ```
 
+En process/T1, el executor vacía el entorno heredado antes de lanzar el bootstrap y
+solo inyecta las variables del contrato anterior más `PATH=/usr/bin:/bin`. No hereda
+credenciales, tokens, `HOME`, proxies ni opciones de intérpretes del daemon. Los
+bundles pueden configurar sus propias variables (p.ej. `PYTHONPATH` para el RIC).
+Esta restricción no aporta aislamiento de usuario, filesystem ni red; las variables
+de usuario de §52 siguen pendientes del paso 13.
+
+En Unix, process/T1 crea un grupo por environment (`PGID=PID` del bootstrap). La
+terminación, invalidación y liberación del environment señalan ese grupo con `SIGKILL`
+antes de recolectar al líder, conservando su identidad incluso si ya terminó. No se
+promete contención de procesos que abandonen el grupo ni limpieza tras `SIGKILL` del
+daemon; esas garantías requieren el aislamiento de v0.2.
+
 ## El RIC es la palanca que acota el esfuerzo
 
 El RIC (§19) ya implementa el poll-loop, la resolución de handler, el `context` y la serialización de errores para Node y Python. El bundle es **ensamblar, no reimplementar**:

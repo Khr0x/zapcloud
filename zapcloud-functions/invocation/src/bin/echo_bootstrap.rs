@@ -24,6 +24,7 @@ fn main() {
     let base = format!("http://{api}{}", "/2018-06-01/runtime");
     let pid = std::process::id();
     let mut count: u64 = 0;
+    let mut children = Vec::new();
 
     let client = reqwest::blocking::Client::new();
 
@@ -51,7 +52,8 @@ fn main() {
         let event = resp.text().unwrap_or_default();
         count += 1;
 
-        match handle(&event, &handler, &region, pid, count) {
+        children.retain_mut(|child: &mut std::process::Child| matches!(child.try_wait(), Ok(None)));
+        match handle(&event, &handler, &region, pid, count, &mut children) {
             Ok(body) => {
                 let _ = client
                     .post(format!("{base}/invocation/{request_id}/response"))
@@ -80,6 +82,7 @@ fn handle(
     region: &str,
     pid: u32,
     count: u64,
+    children: &mut Vec<std::process::Child>,
 ) -> Result<String, String> {
     let parsed: serde_json::Value = serde_json::from_str(event).map_err(|e| e.to_string())?;
 
@@ -90,12 +93,26 @@ fn handle(
         std::thread::sleep(std::time::Duration::from_millis(delay));
     }
 
+    // Fixture para verificar que invalidar una función también termina sus hijos.
+    let child_pid = if parsed.get("spawn_child").and_then(|v| v.as_bool()) == Some(true) {
+        let child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let pid = child.id();
+        children.push(child);
+        Some(pid)
+    } else {
+        None
+    };
+
     let out = serde_json::json!({
         "echo": parsed,
         "handler": handler,
         "region": region,
         "pid": pid,
         "count": count,
+        "child_pid": child_pid,
     });
     Ok(out.to_string())
 }
