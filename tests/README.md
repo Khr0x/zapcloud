@@ -41,6 +41,22 @@ Simula dos publicaciones desde el mismo índice base y verifica que sobreviven
 ambos pins, independientemente del orden, junto con las entradas no publicadas.
 También rechaza snapshots completos, duplicados y fragmentos mal formados.
 
+## Instalación y recuperación de runtimes
+
+```sh
+cargo test --locked -p zc-runtime --lib distribute::tests
+```
+
+La suite verifica pin completo, upgrade/rollback offline, reparación de corrupción,
+fallos de descarga/activación, cancelación, staging abandonado, instaladores
+simultáneos y lectores que conservan una generación completa. En Linux incluye
+migración del directorio legacy por intercambio atómico y el `ensure` público con
+el cliente OCI real contra un mini registry HTTP en loopback: comprueba digest,
+descarga, reparación y rollback sin servicios externos ni credenciales.
+
+Estos tests no se ignoran en CI Linux. El round-trip opcional contra un registry
+externo conserva su `#[ignore]` y sus prerrequisitos descritos abajo.
+
 ## Pruebas con prerrequisitos externos
 
 Los E2E Node/Python requieren bundles del host; en macOS usan `dev-runtime` y no

@@ -61,7 +61,8 @@ fn config_path(mut args: impl Iterator<Item = String>) -> Result<PathBuf> {
 }
 
 /// `zapcloud runtimes install [--runtime <r>] [--config <path>]` (§17): baja y
-/// verifica los bundles ausentes desde el registry OCI. Sin `--runtime`, instala
+/// reconcilia los bundles con el pin del índice (instalación, reparación o rollback).
+/// Sin `--runtime`, instala
 /// los de `[runtimes].preinstall`. El CLI completo (`runtimes list`, `doctor`)
 /// llega en el paso 22.
 async fn run_runtimes(args: Vec<String>) -> Result<()> {
@@ -108,8 +109,8 @@ async fn run_runtimes(args: Vec<String>) -> Result<()> {
 }
 
 /// Preflight de `serve` (§17): si `ensure_on_start`, asegura los `preinstall`
-/// antes de escuchar. Un fallo NO aborta el arranque — se avisa y el invoke de
-/// ese runtime devolverá `RuntimeUnavailable` (visible en `/health/ready`).
+/// antes de escuchar. Un fallo NO aborta el arranque ni cambia el bundle activo:
+/// se avisa y, si había una generación anterior utilizable, se conserva.
 async fn preflight_runtimes(config: &Config) {
     if !config.runtimes.ensure_on_start || config.runtimes.preinstall.is_empty() {
         return;
@@ -134,7 +135,7 @@ async fn preflight_runtimes(config: &Config) {
             Ok(outcome) => tracing::info!(runtime = %r, ?outcome, "preflight: runtime listo"),
             Err(error) => tracing::warn!(
                 runtime = %r, %error,
-                "preflight: runtime no disponible (invoke devolverá RuntimeUnavailable)"
+                "preflight: no se pudo aplicar el pin deseado; instalación anterior conservada si existía"
             ),
         }
     }

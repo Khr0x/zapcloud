@@ -58,6 +58,10 @@ pub fn is_bundle_runtime(runtime: &str) -> bool {
     bundle_spec(runtime).is_some()
 }
 
+pub(crate) fn interpreter_binary(runtime: &str) -> Option<&'static str> {
+    bundle_spec(runtime).map(|s| s.interp_bin)
+}
+
 /// Nombre del directorio del bundle para `runtime` en `(os, arch)`, p.ej.
 /// `nodejs22-linux-arm64`. `None` si el runtime no tiene bundle.
 pub fn bundle_dir_name(runtime: &str, os: &str, arch: &str) -> Option<String> {
@@ -84,7 +88,11 @@ pub fn resolve(runtimes_root: &Path, runtime: &str) -> Result<RuntimeSource, Run
 fn resolve_bundle(runtimes_root: &Path, spec: &BundleSpec) -> Result<RuntimeSource, RuntimeError> {
     let (os, arch) = host_os_arch()?;
     let dir_name = format!("{}-{os}-{arch}", spec.family_prefix);
-    let dir = runtimes_root.join(&dir_name);
+    // Fijar la generación antes de verificar o devolver rutas. Un upgrade cambia
+    // el enlace público, pero los environments existentes conservan sus bytes.
+    let dir = std::fs::canonicalize(runtimes_root.join(&dir_name)).map_err(|e| {
+        RuntimeError::Unavailable(format!("bundle '{dir_name}' no disponible: {e}"))
+    })?;
     let bootstrap = dir.join("bootstrap");
     let interpreter = dir.join(spec.interp_bin);
 
@@ -108,7 +116,7 @@ fn resolve_bundle(runtimes_root: &Path, spec: &BundleSpec) -> Result<RuntimeSour
 }
 
 /// Verifica la integridad del bundle una sola vez por (proceso, ruta). El cache
-/// de runtimes es inmutable una vez instalado, así que memoizar es seguro.
+/// usa rutas canónicas de generaciones que `ensure` nunca modifica ni borra.
 fn verify_once(dir: &Path) -> Result<(), RuntimeError> {
     static VERIFIED: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
 

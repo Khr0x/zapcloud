@@ -42,20 +42,67 @@ cargo run -p xtask -- verify runtimes/nodejs22-linux-x86_64
 # Publicar a ghcr + pinnear la entrada en runtimes/index.json (solo Linux).
 cargo run -p xtask -- publish --runtime nodejs22.x --target linux-x86_64
 
-# En un host desplegado: bajar y verificar los bundles ausentes.
+# En un host desplegado: aplicar el pin del índice (instalar, actualizar o reparar).
 zapcloud runtimes install --runtime nodejs22.x
 ```
 
 - **Resolución en el invoke** (`zc-runtime::resolve`): cache-only, **nunca toca
   la red**. Si el bundle falta o su integridad no verifica, el cold start falla.
 - **`ensure`** (install / preflight de `serve`): lo único que baja de la red.
-  Descarga pinneada por `oci_digest`, verifica `tree_sha256`, instala atómico
-  (staging + rename). La comparación con el estado deseado, reparación de un
-  destino corrupto y rollback todavía son trabajo del milestone v0.1.2.
+  Compara la entrada completa del índice con el recibo de instalación y verifica
+  el árbol, runtime, SO, arquitectura y versiones del manifest. Un cambio de
+  `oci_digest` cuenta como cambio de pin aunque el árbol sea idéntico.
 
 > **Estado actual:** `runtimes/index.json` ya está poblado para Linux/amd64. Una
 > instalación desde un binario con cache vacía aún necesita recibir ese índice como
 > recurso versionado; `ensure` no puede descubrir el runtime sin él.
+
+### Actualización, reparación y rollback
+
+Cada instalación verificada se guarda bajo
+`.versions/<bundle>/gen-<id>/bundle/`, con un recibo `pin.json` al lado. La ruta
+pública, por ejemplo `nodejs22-linux-x86_64`, es un symlink relativo a la generación
+activa. `resolve` devuelve rutas canónicas: cambiar el enlace afecta a los nuevos
+environments; los existentes siguen usando su generación.
+
+Para actualizar o volver a una versión anterior, despliega el `index.json`
+revisado correspondiente y ejecuta `zapcloud runtimes install`. `ensure` valida
+primero una generación conservada del pin solicitado; si no existe o está corrupta,
+descarga por digest OCI, verifica y activa una nueva generación. No modifica ni
+borra los bytes de una generación anterior. Con `[runtimes].offline = true` puede
+hacer rollback a una generación íntegra en cache; falla si el pin deseado no está
+disponible. No acepta otro pin ni un índice ausente como sustituto.
+
+Un lock del SO por bundle serializa instaladores, incluso de distintos procesos.
+El cambio de enlace usa un único rename, sin ventana con el destino ausente. Un
+fallo de descarga, integridad o activación conserva el destino anterior. Cancelar
+la descarga limpia staging; tras morir el proceso, la próxima instalación limpia
+staging abandonado y puede reutilizar generaciones verificadas sin activar.
+Esto cubre interrupciones de proceso; no promete durabilidad ante pérdida eléctrica
+(no hay un protocolo de `fsync` del árbol completo).
+
+**Migración del layout anterior:** la primera instalación necesita red para
+acreditar el digest OCI; un manifest local no prueba ese digest. En Linux se
+intercambian atómicamente el directorio antiguo y el enlace con `renameat2` /
+`RENAME_EXCHANGE`, conservando el directorio en `.previous-*`. Si el filesystem no
+soporta el intercambio, falla sin eliminar el directorio anterior. Detén los
+daemons antiguos durante esta primera migración: pueden conservar rutas del
+layout anterior. Los upgrades posteriores entre generaciones no lo necesitan.
+
+GC/cuotas siguen pendientes: las generaciones y backups se conservan y consumen
+disco. No los borres mientras un environment pueda usarlos. El preflight mantiene
+su política de advertir y continuar si falla; puede seguir disponible el bundle
+anterior, pero eso no acredita que el pin nuevo se haya aplicado.
+
+Pruebas de recuperación, sin registry externo (el E2E levanta HTTP en loopback):
+
+```sh
+cargo test --locked -p zc-runtime --lib distribute::tests
+```
+
+CI Linux las ejecuta en el test del workspace, incluidas migración legacy y
+descarga OCI real. macOS solo prueba la lógica local; la distribución pública
+continúa restringida a Linux.
 
 ---
 

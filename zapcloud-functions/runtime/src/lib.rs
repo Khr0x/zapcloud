@@ -10,7 +10,7 @@
 //!      verificación de integridad. Es lo que corre en el cold start del invoke;
 //!      NO toca la red.
 //!   3. **Distribución** ([`index`], `oci`, `ensure`): índice pinneado +
-//!      bundles como OCI artifacts. `ensure` baja y verifica un bundle ausente;
+//!      bundles como OCI artifacts. `ensure` aplica el pin, repara y hace rollback;
 //!      se dispara **explícitamente** (`zapcloud runtimes install` / preflight),
 //!      nunca desde el hot path.
 
