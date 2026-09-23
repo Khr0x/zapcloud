@@ -145,7 +145,9 @@ instala Node desde una cache vacía y fuera del checkout. El GC prueba bajo pres
 que conserva generaciones activas o referenciadas. El RIC Node usa `npm ci` y
 lockfile; Python usa versiones y hashes de wheels Linux amd64/arm64. Imágenes de
 build cruzado y acciones de CI están fijadas por digest/SHA; un SBOM inválido
-bloquea publicación antes del push. Falta enlazar la ejecución verde de CI.
+bloquea publicación antes del push. Evidencia de la [PR #23](https://github.com/Khr0x/zapcloud/pull/23):
+[CI general verde, incluida instalación desde cache vacía](https://github.com/Khr0x/zapcloud/actions/runs/35819236261)
+y [runtimes Linux amd64 verde para Node/Python](https://github.com/Khr0x/zapcloud/actions/runs/35819236267).
 Los bundles rechazan arquitectura distinta al host en cold start; timeout y
 payload tienen E2E, pero `MemorySize` sigue siendo metadata sin enforcement.
 La referencia AWS revisada aún no está capturada, por lo que semántica y golden
