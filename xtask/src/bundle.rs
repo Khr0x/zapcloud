@@ -323,16 +323,17 @@ fn assemble(family: Family, target: Target, out: &Path) -> Result<()> {
     //    del RIC): determinista (§16), sin UUID/timestamp, y cubre también el
     //    bundle darwin (sin RIC), que antes salía vacío.
     let sbom = match family {
-        Family::Node => ric
-            .as_ref()
-            .and_then(|r| r.sbom_cyclonedx.as_deref())
-            .map(normalize_node_sbom)
-            .unwrap_or_else(|| "{}\n".to_string()),
+        Family::Node => normalize_node_sbom(
+            ric.as_ref()
+                .and_then(|r| r.sbom_cyclonedx.as_deref())
+                .context("npm no produjo el SBOM del RIC Node")?,
+        )?,
         Family::Python => {
             let ric_dir = ric.as_ref().map(|r| bundle_dir.join(r.dest_rel));
             python_sbom(ric_dir.as_deref(), family.interpreter_version())?
         }
     };
+    validate_sbom(&sbom)?;
     fs::write(bundle_dir.join("sbom.cdx.json"), &sbom).context("escribiendo SBOM")?;
 
     // 5. Manifiesto (se escribe al final: su tree_sha256 cubre todo lo demás).
@@ -708,10 +709,11 @@ fn install_ric_node(work: &Path, target: Target, via_docker: bool) -> Result<Ric
     let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join(Family::Node.assets_subdir());
     fs::copy(assets.join("package.json"), proj.join("package.json"))
         .context("copiando package.json pinneado (xtask/assets/nodejs22)")?;
-    let lock = assets.join("package-lock.json");
-    if lock.exists() {
-        fs::copy(&lock, proj.join("package-lock.json"))?;
-    }
+    fs::copy(
+        assets.join("package-lock.json"),
+        proj.join("package-lock.json"),
+    )
+    .context("package-lock.json del RIC Node es obligatorio")?;
 
     if via_docker {
         install_ric_node_docker(&proj, target)?;
@@ -720,21 +722,21 @@ fn install_ric_node(work: &Path, target: Target, via_docker: bool) -> Result<Ric
         // omite (macOS → se usa dev-runtime.mjs).
         run_cmd(
             Command::new("npm")
-                .args(["install", "--no-audit", "--no-fund"])
+                .args(["ci", "--no-audit", "--no-fund"])
                 .current_dir(&proj),
         )
-        .context("npm install del RIC")?;
+        .context("npm ci del RIC")?;
     }
 
     let pkg = proj.join("node_modules/aws-lambda-ric");
     if !pkg.is_dir() {
-        bail!("el RIC (aws-lambda-ric) no quedó en node_modules tras npm install");
+        bail!("el RIC (aws-lambda-ric) no quedó en node_modules tras npm ci");
     }
     let version = read_pkg_version(&pkg.join("package.json"))?;
     let license_file = first_existing(&pkg, &["LICENSE", "LICENSE.txt", "LICENSE.md"]);
 
     // SBOM CycloneDX del árbol npm (npm >= 9). El camino Docker ya lo dejó en
-    // proj/sbom.cdx.json; si no, se genera en el host. Best-effort.
+    // proj/sbom.cdx.json; si no, se genera en el host. Un fallo bloquea el bundle.
     let sbom_cyclonedx = fs::read_to_string(proj.join("sbom.cdx.json"))
         .ok()
         .or_else(|| {
@@ -818,13 +820,18 @@ fn install_ric_node_docker(proj: &Path, target: Target) -> Result<()> {
         apt-get install -y --no-install-recommends \
           cmake autoconf automake libtool make g++ python3 xz-utils ca-certificates >/dev/null; \
         mkdir -p /build && cp /work/package.json /build/; \
-        cp /work/package-lock.json /build/ 2>/dev/null || true; \
+        cp /work/package-lock.json /build/; \
         cd /build; \
-        npm install --no-audit --no-fund; \
-        npm sbom --sbom-format cyclonedx > /work/sbom.cdx.json 2>/dev/null || true; \
+        npm ci --no-audit --no-fund; \
+        npm sbom --sbom-format cyclonedx > /work/sbom.cdx.json; \
         cp -a /build/node_modules /work/node_modules; \
-        cp -f /build/package-lock.json /work/ 2>/dev/null || true";
-    run_docker_build(proj, target, "node:22-bookworm", script)
+        cp -f /build/package-lock.json /work/";
+    run_docker_build(
+        proj,
+        target,
+        "docker.io/library/node:22-bookworm@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844",
+        script,
+    )
 }
 
 /// Compila el RIC de Python (`awslambdaric`, extensión C contra libcurl) dentro
@@ -836,9 +843,14 @@ fn install_ric_python_docker(proj: &Path, target: Target) -> Result<()> {
         apt-get install -y --no-install-recommends \
           build-essential cmake autoconf automake libtool libcurl4-openssl-dev ca-certificates >/dev/null; \
         mkdir -p /build && cp /work/requirements.txt /build/; cd /build; \
-        pip install --no-cache-dir --target /build/ric -r requirements.txt; \
+        pip install --no-cache-dir --only-binary=:all: --require-hashes --target /build/ric -r requirements.txt; \
         cp -a /build/ric /work/ric";
-    run_docker_build(proj, target, "python:3.13-bookworm", script)
+    run_docker_build(
+        proj,
+        target,
+        "docker.io/library/python:3.13-bookworm@sha256:227b6570d6ee07061ae6ca2eb04dedfb6d2b34045835f343065b9869e4d427ea",
+        script,
+    )
 }
 
 /// Ejecuta un script de build dentro de un contenedor del target, con `proj`
@@ -881,21 +893,37 @@ fn dist_info_version(target_dir: &Path, package: &str) -> Result<String> {
 /// aleatorio) y un `metadata.timestamp` (hora del build); ambos entran en
 /// `tree_sha256` y romperían el gate de reproducibilidad. Se quitan y se
 /// reserializa vía `serde_json::Value`, que (sin `preserve_order`) ordena las
-/// claves — eliminando también cualquier no-determinismo de orden. Best-effort:
-/// si el JSON no parsea, se devuelve tal cual.
-fn normalize_node_sbom(raw: &str) -> String {
-    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(raw) else {
-        return raw.to_string();
-    };
+/// claves — eliminando también cualquier no-determinismo de orden.
+fn normalize_node_sbom(raw: &str) -> Result<String> {
+    validate_sbom(raw)?;
+    let mut v = serde_json::from_str::<serde_json::Value>(raw)?;
     if let Some(obj) = v.as_object_mut() {
         obj.remove("serialNumber");
         if let Some(meta) = obj.get_mut("metadata").and_then(|m| m.as_object_mut()) {
             meta.remove("timestamp");
         }
     }
-    serde_json::to_string_pretty(&v)
-        .map(|s| s + "\n")
-        .unwrap_or_else(|_| raw.to_string())
+    Ok(serde_json::to_string_pretty(&v)? + "\n")
+}
+
+/// Gate mínimo antes de publicar: evita `{}`, JSON roto y listas vacías.
+pub(crate) fn validate_sbom(raw: &str) -> Result<()> {
+    let value: serde_json::Value = serde_json::from_str(raw).context("SBOM no es JSON válido")?;
+    if value.get("bomFormat").and_then(|v| v.as_str()) != Some("CycloneDX")
+        || value.get("specVersion").and_then(|v| v.as_str()).is_none()
+        || !value
+            .get("components")
+            .and_then(|v| v.as_array())
+            .is_some_and(|components| {
+                !components.is_empty()
+                    && components
+                        .iter()
+                        .all(|component| component.get("name").and_then(|v| v.as_str()).is_some())
+            })
+    {
+        bail!("SBOM inválido: se requiere CycloneDX con versión y componentes identificados");
+    }
+    Ok(())
 }
 
 /// (PSF) más un componente por cada `.dist-info` del RIC. Determinista a propósito
@@ -1100,18 +1128,29 @@ mod tests {
     fn normalize_node_sbom_es_determinista() {
         // Mismo SBOM, distinto serialNumber/timestamp (lo que hace npm en cada
         // corrida) → misma salida normalizada, y sin esos campos.
-        let a = r#"{"serialNumber":"urn:uuid:aaaa","metadata":{"timestamp":"2026-01-01T00:00:00Z","tools":[]},"components":[]}"#;
-        let b = r#"{"serialNumber":"urn:uuid:bbbb","metadata":{"timestamp":"2026-09-03T12:00:00Z","tools":[]},"components":[]}"#;
-        let na = normalize_node_sbom(a);
-        assert_eq!(na, normalize_node_sbom(b), "debe ser estable build a build");
+        let a = r#"{"bomFormat":"CycloneDX","specVersion":"1.5","serialNumber":"urn:uuid:aaaa","metadata":{"timestamp":"2026-01-01T00:00:00Z","tools":[]},"components":[{"name":"ric"}]}"#;
+        let b = r#"{"bomFormat":"CycloneDX","specVersion":"1.5","serialNumber":"urn:uuid:bbbb","metadata":{"timestamp":"2026-09-03T12:00:00Z","tools":[]},"components":[{"name":"ric"}]}"#;
+        let na = normalize_node_sbom(a).unwrap();
+        assert_eq!(
+            na,
+            normalize_node_sbom(b).unwrap(),
+            "debe ser estable build a build"
+        );
         assert!(!na.contains("serialNumber"), "serialNumber debe quitarse");
         assert!(!na.contains("timestamp"), "timestamp debe quitarse");
         assert!(na.contains("components"), "el resto del SBOM se conserva");
     }
 
     #[test]
-    fn normalize_node_sbom_json_invalido_pasa_tal_cual() {
-        assert_eq!(normalize_node_sbom("no json"), "no json");
+    fn sbom_invalido_bloquea_bundle_y_publicacion() {
+        for raw in [
+            "no json",
+            "{}",
+            r#"{"bomFormat":"CycloneDX","specVersion":"1.5","components":[]}"#,
+        ] {
+            assert!(normalize_node_sbom(raw).is_err());
+            assert!(validate_sbom(raw).is_err());
+        }
     }
 
     #[test]

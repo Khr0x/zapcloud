@@ -49,6 +49,7 @@ fn print_help() {
     println!("zapcloud v{}", env!("CARGO_PKG_VERSION"));
     println!("uso: zapcloud serve [--config <path>]");
     println!("     zapcloud runtimes install [--runtime <r>] [--config <path>]");
+    println!("     zapcloud runtimes gc [--config <path>]");
     println!("     zapcloud spike");
 }
 
@@ -67,15 +68,17 @@ fn config_path(mut args: impl Iterator<Item = String>) -> Result<PathBuf> {
 /// llega en el paso 22.
 async fn run_runtimes(args: Vec<String>) -> Result<()> {
     let mut it = args.into_iter();
-    match it.next().as_deref() {
-        Some("install") => {}
-        _ => anyhow::bail!("uso: zapcloud runtimes install [--runtime <r>] [--config <path>]"),
+    let command = it.next().unwrap_or_default();
+    if command != "install" && command != "gc" {
+        anyhow::bail!("uso: zapcloud runtimes <install|gc> [--config <path>]");
     }
     let mut runtime = None;
     let mut config_file = PathBuf::from("zapcloud.toml");
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--runtime" => runtime = Some(it.next().context("--runtime requiere un valor")?),
+            "--runtime" if command == "install" => {
+                runtime = Some(it.next().context("--runtime requiere un valor")?)
+            }
             "--config" => {
                 config_file = PathBuf::from(it.next().context("--config requiere un valor")?)
             }
@@ -87,6 +90,9 @@ async fn run_runtimes(args: Vec<String>) -> Result<()> {
         .with_context(|| format!("cargando configuración desde {}", config_file.display()))?;
     zc_telemetry::init();
     let runtimes_root = absolute_path(&config.storage.runtimes)?;
+    if command == "gc" {
+        return apply_cache_quota(&runtimes_root, config.runtimes.max_cache_bytes);
+    }
     let index = load_index(&runtimes_root)?;
     let auth = zc_runtime::registry_auth_from_env();
 
@@ -104,6 +110,23 @@ async fn run_runtimes(args: Vec<String>) -> Result<()> {
                 .await
                 .with_context(|| format!("instalando runtime '{r}'"))?;
         tracing::info!(runtime = %r, ?outcome, "runtime listo");
+    }
+    if let Some(limit) = config.runtimes.max_cache_bytes {
+        apply_cache_quota(&runtimes_root, Some(limit))?;
+    }
+    Ok(())
+}
+
+fn apply_cache_quota(root: &std::path::Path, limit: Option<u64>) -> Result<()> {
+    let limit = limit.context("define [runtimes].max_cache_bytes para ejecutar GC")?;
+    let report = zc_runtime::gc::gc(root, limit)?;
+    tracing::info!(?report, limit, "GC de runtimes terminado");
+    if report.after_bytes > limit {
+        anyhow::bail!(
+            "cuota de runtimes excedida: {} > {} bytes; generaciones activas o en uso conservadas",
+            report.after_bytes,
+            limit
+        );
     }
     Ok(())
 }
@@ -139,13 +162,26 @@ async fn preflight_runtimes(config: &Config) {
             ),
         }
     }
+    if let Some(limit) = config.runtimes.max_cache_bytes {
+        if let Err(error) = apply_cache_quota(&runtimes_root, Some(limit)) {
+            tracing::warn!(%error, "preflight: no se cumplió la cuota de runtimes");
+        }
+    }
 }
 
-/// Carga el índice de distribución de `<runtimes_root>/index.json` (§17). Ausente
-/// = índice vacío (no hay nada publicado que instalar).
+/// El binario lleva el índice revisado con el que se compiló. Un índice local
+/// permite aplicar otro pin (upgrade/rollback) sin recompilar el daemon.
 fn load_index(runtimes_root: &std::path::Path) -> Result<zc_runtime::Index> {
     let path = runtimes_root.join("index.json");
-    zc_runtime::index::load(&path).with_context(|| format!("cargando índice {}", path.display()))
+    if path.exists() {
+        return zc_runtime::index::load(&path)
+            .with_context(|| format!("cargando índice {}", path.display()));
+    }
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../runtimes/index.json"
+    )))
+    .context("índice de runtimes incorporado al binario inválido")
 }
 
 async fn run_serve(config_path: PathBuf) -> Result<()> {
@@ -422,7 +458,14 @@ mod tests {
 
     #[tokio::test]
     async fn ensamblaje_expone_health_y_metrics() {
-        let root = std::env::temp_dir().join(format!("zapcloud-serve-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "zapcloud-serve-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let config = test_config(&root);
         let app = build_app(&config).await.unwrap();
 
@@ -489,6 +532,33 @@ mod tests {
             PathBuf::from("custom.toml")
         );
         assert!(config_path(["--bad".into()].into_iter()).is_err());
+    }
+
+    #[test]
+    fn indice_incorporado_en_cache_vacia_y_override_local() {
+        let root = std::env::temp_dir().join(format!(
+            "zapcloud-index-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert!(!root.exists());
+        let bundled = load_index(&root).unwrap();
+        assert!(bundled.contains_key("nodejs22.x"));
+        assert!(bundled.contains_key("python3.13"));
+        assert!(!root.exists(), "leer el índice no crea una cache");
+
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("index.json"), "{}").unwrap();
+        assert!(load_index(&root).unwrap().is_empty());
+        std::fs::write(root.join("index.json"), "invalid").unwrap();
+        assert!(
+            load_index(&root).is_err(),
+            "un override corrupto debe fallar"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

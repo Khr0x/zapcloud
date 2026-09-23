@@ -109,7 +109,11 @@ jobs:
       - name: Matriz local con SigV4 (sin cuenta AWS)
         run: |
           python -m unittest discover -s tests/golden -p 'test_*.py'
-          python tests/golden/run.py
+          if test -f tests/golden/aws-reference.json; then
+            python tests/golden/run.py --reference tests/golden/aws-reference.json
+          else
+            python tests/golden/run.py
+          fi
       - name: Guardar evidencia
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -124,6 +128,42 @@ jobs:
           ### Golden compatibility — base local
           AWS CLI, SDK JS v3 y Boto3 ejecutan los mismos casos contra un daemon con SigV4.
           Versiones, resultados y procedencia están en el artefacto `golden-local`.
-          **Referencia AWS no capturada:** este job verifica el contrato documentado,
-          no acredita paridad AWS ni cierra el gate de v0.1.2. Ver `tests/golden/README.md`.
+          Si `tests/golden/aws-reference.json` está versionado, el job exige
+          comparación exacta de observables; el artefacto registra `matched`.
+          Sin esa captura revisada, solo verifica el contrato documentado y no
+          acredita paridad AWS. Ver `tests/golden/README.md`.
           EOF
+
+  runtime-install:
+    name: runtime install (cache vacía)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Instalar Rust fijado
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          key: runtime-install
+      - name: Compilar binario
+        run: cargo build --locked -p zapcloud
+      - name: Instalar desde fuera del checkout y una cache vacía
+        run: |
+          mkdir -p "$RUNNER_TEMP/install/bin" "$RUNNER_TEMP/install/work"
+          cp target/debug/zapcloud "$RUNNER_TEMP/install/bin/zapcloud"
+          cat > "$RUNNER_TEMP/install/work/zapcloud.toml" <<EOF
+          [storage]
+          metadata = "sqlite://$RUNNER_TEMP/install/work/metadata.db"
+          artifacts = "$RUNNER_TEMP/install/work/artifacts"
+          runtimes = "$RUNNER_TEMP/install/work/cache"
+          [security]
+          tenant_trust = "trusted"
+          EOF
+          test ! -e "$RUNNER_TEMP/install/work/cache/index.json"
+          cd "$RUNNER_TEMP/install/work"
+          ../bin/zapcloud runtimes install --runtime nodejs22.x
+          test -L cache/nodejs22-linux-x86_64
+          test -f cache/nodejs22-linux-x86_64/manifest.json
+          test ! -e cache/index.json

@@ -42,7 +42,7 @@ use zc_artifact_store::ArtifactStore;
 use zc_aws_protocol::LambdaArn;
 use zc_executor_sandbox::{Environment, FunctionSpec, ProcessExecutor};
 use zc_persistence::{Database, Function};
-use zc_runtime::{resolve as resolve_runtime, RuntimeError, RuntimeSource};
+use zc_runtime::{resolve as resolve_runtime, RuntimeError, RuntimeLease, RuntimeSource};
 
 pub use zc_executor_sandbox::InvokeOutcome;
 
@@ -52,6 +52,18 @@ const ZIP_PACKAGE_TYPE: &str = "Zip";
 /// chroot (el bootstrap del ZIP vive en el task_root). Los bundles Node/Python
 /// aportan un runtime_dir real (ver `runtime::resolve`).
 const RUNTIME_DIR: &str = "/var/runtime";
+
+fn validate_runtime_architecture(runtime: &str, requested: &str) -> Result<()> {
+    if zc_runtime::is_bundle_runtime(runtime) {
+        let (_, host) = zc_runtime::host_os_arch()?;
+        if requested != host {
+            return Err(InvocationError::Unsupported(format!(
+                "architecture={requested} incompatible con el host {host} en executor=process"
+            )));
+        }
+    }
+    Ok(())
+}
 
 /// Error de dominio del camino de invocación. Sin framing AWS (eso es `api-lambda`).
 #[derive(Debug, thiserror::Error)]
@@ -101,6 +113,7 @@ struct WarmEnv {
     env: Environment,
     /// task_root desempaquetado; se mantiene vivo mientras exista el environment.
     task_root: PathBuf,
+    _runtime_lease: Option<RuntimeLease>,
     retired: bool,
 }
 
@@ -254,6 +267,7 @@ impl Invoker {
     /// Cold start (§21): resuelve el artifact, verifica integridad, desempaqueta
     /// el ZIP y arranca el proceso con el contrato de entorno §16.
     async fn cold_start(&self, function: &Function) -> Result<WarmEnv> {
+        validate_runtime_architecture(&function.runtime, &function.architecture)?;
         // Resolver el artifact de código vía latest_artifact_id → Artifact.
         let artifact_id = function.latest_artifact_id.as_deref().ok_or_else(|| {
             InvocationError::InvalidArtifact(format!(
@@ -296,15 +310,17 @@ impl Invoker {
         .map_err(|e| InvocationError::InvalidArtifact(e.to_string()))?;
 
         // El bootstrap + runtime_dir salen del ZIP (provided) o del bundle.
-        let (bootstrap_path, runtime_dir) = match source {
+        let (bootstrap_path, runtime_dir, runtime_lease) = match source {
             RuntimeSource::ZipProvided => (
                 zip_bootstrap.expect("provided garantiza bootstrap del ZIP"),
                 PathBuf::from(RUNTIME_DIR),
+                None,
             ),
             RuntimeSource::Bundle {
                 bootstrap,
                 runtime_dir,
-            } => (bootstrap, runtime_dir),
+                lease,
+            } => (bootstrap, runtime_dir, Some(lease)),
         };
 
         // Arrancar el proceso con el contrato de entorno §16 (§21).
@@ -338,7 +354,25 @@ impl Invoker {
             executor,
             env,
             task_root,
+            _runtime_lease: runtime_lease,
             retired: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_con_bundle_rechaza_arquitectura_ajena() {
+        let (_, host) = zc_runtime::host_os_arch().unwrap();
+        let other = if host == "arm64" { "x86_64" } else { "arm64" };
+        assert!(validate_runtime_architecture("nodejs22.x", host).is_ok());
+        assert!(matches!(
+            validate_runtime_architecture("python3.13", other),
+            Err(InvocationError::Unsupported(_))
+        ));
+        assert!(validate_runtime_architecture("provided.al2023", other).is_ok());
     }
 }

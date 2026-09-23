@@ -70,8 +70,8 @@ publican como OCI artifacts con `xtask publish` (push a ghcr + pin en `runtimes/
 por `oci_digest` + `tree_sha256`), y `zapcloud runtimes install` / el preflight de `serve`
 los bajan verificando digest e integridad antes de un rename atómico. Solo se distribuye el
 carril Linux; los bundles darwin siguen siendo dev-only. El índice ya contiene publicaciones,
-pero el paso sigue parcial: una instalación desde un binario sin índice local no
-tiene cómo descubrir qué descargar y faltan GC/cuotas. `ensure` ya compara pins,
+pero el paso sigue parcial hasta obtener CI verde del índice incorporado y la
+cuota de generaciones. `ensure` ya compara pins,
 repara corrupción y activa generaciones para upgrade/rollback; falta acreditar
 este cambio en CI. El subset Runtime API tiene evidencia RIC Linux, sin acreditar
 paridad AWS completa (ver gates de v0.1.2).
@@ -139,6 +139,17 @@ de los pasos 9–11.
 
 **Definition of Done:** ningún paso 9–11 vuelve a ✅ hasta que todos los gates anteriores
 estén verdes en CI y exista evidencia reproducible enlazada desde este documento.
+
+**Cambios en validación:** el binario incorpora el índice de distribución y CI
+instala Node desde una cache vacía y fuera del checkout. El GC prueba bajo presión
+que conserva generaciones activas o referenciadas. El RIC Node usa `npm ci` y
+lockfile; Python usa versiones y hashes de wheels Linux amd64/arm64. Imágenes de
+build cruzado y acciones de CI están fijadas por digest/SHA; un SBOM inválido
+bloquea publicación antes del push. Falta enlazar la ejecución verde de CI.
+Los bundles rechazan arquitectura distinta al host en cold start; timeout y
+payload tienen E2E, pero `MemorySize` sigue siendo metadata sin enforcement.
+La referencia AWS revisada aún no está capturada, por lo que semántica y golden
+no se declaran cerradas.
 
 **Seguridad process (gate acreditado):** `auth=none` se rechaza fuera de loopback al cargar la
 configuración, antes del preflight, almacenamiento o bind. La excepción explícita es
@@ -406,9 +417,10 @@ estabilizados, el control plane puede añadir las dos APIs de configuración que
 (memoria, timeout, handler, runtime y, posteriormente, env vars) sin consolidar semántica
 incorrecta.
 
-> **Estado operativo del paso 11:** `runtimes/index.json` ya contiene pins publicados. Sigue
-> pendiente que `ensure` aplique desired-state/rollback/reparación, que una instalación nueva
-> pueda obtener el índice y que el merge de la matriz no pierda actualizaciones.
+> **Estado operativo del paso 11:** `runtimes/index.json` contiene pins publicados;
+> `ensure` aplica desired-state, reparación y rollback. El binario incorpora el
+> índice y el GC conserva generaciones activas o en uso. Falta acreditar el
+> nuevo flujo de instalación y la cuota en CI antes de cerrar operación mínima.
 
 > **Nota de los pasos 9–10 (parciales):** el RIC de AWS (`aws-lambda-ric` / `awslambdaric`)
 > **solo compila en Linux**;

@@ -146,6 +146,9 @@ pub struct RuntimesConfig {
     /// Si `true`, nunca toca la red: solo usa la cache local.
     #[serde(default)]
     pub offline: bool,
+    /// Límite para generaciones conservadas (bytes). Las activas o en uso no se borran.
+    #[serde(default)]
+    pub max_cache_bytes: Option<u64>,
 }
 
 impl Default for RuntimesConfig {
@@ -155,6 +158,7 @@ impl Default for RuntimesConfig {
             preinstall: Vec::new(),
             ensure_on_start: false,
             offline: false,
+            max_cache_bytes: None,
         }
     }
 }
@@ -220,6 +224,11 @@ impl Config {
                 "v0.1 solo soporta executor.default = process".into(),
             ));
         }
+        if self.runtimes.max_cache_bytes == Some(0) {
+            return Err(ConfigError::Invalid(
+                "runtimes.max_cache_bytes debe ser mayor que cero".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -277,6 +286,16 @@ tenant_trust = "trusted"
         assert_eq!(config.server.region, "local-1");
         assert_eq!(config.auth.mode, AuthModeConfig::None);
         assert!(!config.auth.allow_insecure_non_loopback);
+        assert_eq!(config.runtimes.max_cache_bytes, None);
+    }
+
+    #[test]
+    fn cuota_de_runtimes_requiere_valor_positivo() {
+        let mut config: Config = toml::from_str(valid()).unwrap();
+        config.runtimes.max_cache_bytes = Some(0);
+        assert!(config.validate().is_err());
+        config.runtimes.max_cache_bytes = Some(1024);
+        config.validate().unwrap();
     }
 
     #[test]

@@ -64,6 +64,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
     // 1. Integridad del bundle en disco (§15). Devuelve su manifest.
     let m = manifest::verify(&bundle_dir)
         .with_context(|| format!("verificando {dir_name} antes de publicar"))?;
+    let sbom = std::fs::read_to_string(bundle_dir.join(&m.sbom)).context("leyendo SBOM")?;
+    crate::bundle::validate_sbom(&sbom).context("SBOM bloquea publicación")?;
 
     // 2. Push OCI (async desde un contexto sync).
     let oci_ref = oci::oci_ref(&registry, &runtime, arch)?;
@@ -113,4 +115,56 @@ fn parse_target(target: Option<&str>) -> Result<(&'static str, &'static str)> {
         other => bail!("arch '{other}' no soportado (arm64|x86_64)"),
     };
     Ok((os, arch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zc_runtime::manifest::Manifest;
+
+    #[test]
+    fn sbom_invalido_impide_publicar_antes_de_contactar_registry() {
+        let out = std::env::temp_dir().join(format!(
+            "zc-publish-sbom-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bundle = out.join("nodejs22-linux-x86_64");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("bootstrap"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(bundle.join("sbom.cdx.json"), "{}").unwrap();
+        let m = Manifest {
+            runtime: "nodejs22.x".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            interpreter_version: "22.11.0".into(),
+            interpreter_tarball_sha256: "a".repeat(64),
+            pbs_release: None,
+            ric_version: Some("4.0.2".into()),
+            bootstrap_sha256: manifest::sha256_file(&bundle.join("bootstrap")).unwrap(),
+            tree_sha256: manifest::tree_sha256(&bundle).unwrap(),
+            sbom: "sbom.cdx.json".into(),
+        };
+        std::fs::write(
+            bundle.join("manifest.json"),
+            serde_json::to_vec(&m).unwrap(),
+        )
+        .unwrap();
+        let error = run(vec![
+            "--runtime".into(),
+            "nodejs22.x".into(),
+            "--target".into(),
+            "linux-x86_64".into(),
+            "--registry".into(),
+            "invalid.example".into(),
+            "--out".into(),
+            out.to_string_lossy().into_owned(),
+        ])
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("SBOM bloquea publicación"));
+        std::fs::remove_dir_all(out).unwrap();
+    }
 }
