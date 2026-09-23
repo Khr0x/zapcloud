@@ -139,6 +139,7 @@ async fn install_upgrade_rollback_y_resolve_fija_generacion() {
     let crate::RuntimeSource::Bundle {
         runtime_dir,
         bootstrap,
+        ..
     } = resolve::resolve(&f.root, RUNTIME).unwrap()
     else {
         panic!()
@@ -166,6 +167,37 @@ async fn install_upgrade_rollback_y_resolve_fija_generacion() {
     assert_eq!(f.offline().await.unwrap(), EnsureOutcome::Installed);
     assert_eq!(f.active(), first);
     assert_eq!(fs::read_to_string(new_dir.join("bin/node")).unwrap(), "2");
+}
+
+#[tokio::test]
+async fn gc_bajo_presion_conserva_activa_y_environment_en_uso() {
+    let mut f = Fixture::new();
+    f.install().await.unwrap();
+    let first = f.active();
+    let in_use = resolve::resolve(&f.root, RUNTIME).unwrap();
+    f.pin("2");
+    f.install().await.unwrap();
+    let cold = f.active();
+    f.pin("3");
+    f.install().await.unwrap();
+    let active = f.active();
+
+    let report = crate::gc::gc(&f.root, 0).unwrap();
+    assert_eq!(report.deleted, 1);
+    assert!(report.after_bytes < report.before_bytes);
+    assert!(first.exists(), "environment vivo conserva su generación");
+    assert!(!cold.exists(), "generación fría se evicta");
+    assert!(active.exists(), "generación activa se conserva");
+
+    drop(in_use);
+    let report = crate::gc::gc(&f.root, 0).unwrap();
+    assert_eq!(report.deleted, 1);
+    assert!(!first.exists());
+    assert!(active.exists());
+    assert_eq!(
+        report.after_bytes,
+        crate::gc::gc(&f.root, 0).unwrap().after_bytes
+    );
 }
 
 #[tokio::test]
@@ -446,6 +478,7 @@ async fn lectores_siempre_resuelven_una_generacion_completa() {
                 let crate::RuntimeSource::Bundle {
                     runtime_dir,
                     bootstrap,
+                    ..
                 } = resolve::resolve(&root, RUNTIME).unwrap()
                 else {
                     panic!()

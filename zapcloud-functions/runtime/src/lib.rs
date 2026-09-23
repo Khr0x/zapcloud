@@ -15,6 +15,7 @@
 //!      nunca desde el hot path.
 
 pub mod distribute;
+pub mod gc;
 pub mod index;
 pub mod manifest;
 pub mod oci;
@@ -23,7 +24,9 @@ pub mod resolve;
 pub use distribute::{ensure, EnsureOutcome};
 pub use index::{Index, IndexEntry};
 pub use manifest::Manifest;
-pub use resolve::{bundle_dir_name, host_os_arch, is_bundle_runtime, resolve, RuntimeSource};
+pub use resolve::{
+    bundle_dir_name, host_os_arch, is_bundle_runtime, resolve, RuntimeLease, RuntimeSource,
+};
 
 pub use oci::registry_auth_from_env;
 

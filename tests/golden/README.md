@@ -91,6 +91,11 @@ tests/golden/.venv/bin/python tests/golden/run.py \
   --reference tests/golden/results/aws-reference.json
 ```
 
+Tras revisar el reporte AWS, guardarlo en `tests/golden/aws-reference.json`.
+El job `golden` de CI detecta ese archivo y falla si cualquier observable local
+difiere de la captura. Sin el archivo, el reporte queda en `not-captured` y el
+gate continúa abierto.
+
 La comparación exige los mismos casos, fuente del fixture, arquitectura y versiones de
 CLI/SDK. Rechaza referencias locales, incompletas, capturas fallidas o resultados distintos.
 Los JSON de referencia son entradas revisadas por el mantenedor; el campo `provider` no es

@@ -11,11 +11,13 @@
 //! verificación se memoiza por proceso para no re-hashear en cada cold start.
 
 use std::collections::HashSet;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::manifest;
 use crate::RuntimeError;
+use anyhow::Context;
 
 /// Origen del bootstrap para un runtime resuelto.
 #[derive(Debug)]
@@ -27,7 +29,14 @@ pub enum RuntimeSource {
     Bundle {
         bootstrap: PathBuf,
         runtime_dir: PathBuf,
+        /// Referencia compartida: GC no puede borrar esta generación.
+        lease: RuntimeLease,
     },
+}
+
+#[derive(Debug)]
+pub struct RuntimeLease {
+    _file: Option<File>,
 }
 
 /// Runtimes con bundle que sabe resolver este crate (§16). `provided.al2023` no
@@ -88,11 +97,43 @@ pub fn resolve(runtimes_root: &Path, runtime: &str) -> Result<RuntimeSource, Run
 fn resolve_bundle(runtimes_root: &Path, spec: &BundleSpec) -> Result<RuntimeSource, RuntimeError> {
     let (os, arch) = host_os_arch()?;
     let dir_name = format!("{}-{os}-{arch}", spec.family_prefix);
+    let versions = runtimes_root.join(".versions").join(&dir_name);
+    let install_lock = versions.join(".lock");
+    let _guard = if install_lock.exists() {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&install_lock)
+            .context("abriendo lock de runtime")?;
+        file.lock_shared()
+            .context("esperando instalador de runtime")?;
+        Some(file)
+    } else {
+        None // layout antiguo, fuera del GC
+    };
     // Fijar la generación antes de verificar o devolver rutas. Un upgrade cambia
     // el enlace público, pero los environments existentes conservan sus bytes.
     let dir = std::fs::canonicalize(runtimes_root.join(&dir_name)).map_err(|e| {
         RuntimeError::Unavailable(format!("bundle '{dir_name}' no disponible: {e}"))
     })?;
+    let managed_versions = std::fs::canonicalize(&versions).ok();
+    let lease = if managed_versions
+        .as_ref()
+        .is_some_and(|p| dir.starts_with(p))
+    {
+        let file = File::options()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(dir.parent().unwrap().join(".lease"))
+            .context("abriendo referencia de generación")?;
+        file.lock_shared()
+            .context("adquiriendo referencia de generación")?;
+        Some(file)
+    } else {
+        None
+    };
     let bootstrap = dir.join("bootstrap");
     let interpreter = dir.join(spec.interp_bin);
 
@@ -112,6 +153,7 @@ fn resolve_bundle(runtimes_root: &Path, spec: &BundleSpec) -> Result<RuntimeSour
     Ok(RuntimeSource::Bundle {
         bootstrap,
         runtime_dir: dir,
+        lease: RuntimeLease { _file: lease },
     })
 }
 

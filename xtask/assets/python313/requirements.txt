@@ -1,4 +1,9 @@
-# Deps pinneadas para ensamblar el bundle python3.13 (§16/§19).
-# Solo el RIC de AWS (Apache-2.0); ningún artefacto de Amazon Linux.
-# ponytail: pin por versión; hash-lock (--require-hashes) = paso 11 (§17).
-awslambdaric==4.0.2
+# Wheels CPython 3.13 Linux amd64/arm64; hashes de PyPI verificados.
+awslambdaric==4.0.2 \
+    --hash=sha256:f0071102d613d877113c4ef9868c1865d235cea0acce9def06d52952c31f9f51 \
+    --hash=sha256:ce0a40940135547d64d5083705a866f934b6ed6ad8f7855de282b368c8e896d5
+simplejson==4.1.2 \
+    --hash=sha256:f17a3c875f0fd6600739ee9bba4137a5138f8fc9524c69be4db8c659e0f703b0 \
+    --hash=sha256:df5da14ae3daafe11c13861a39e7f57a92c2b5fd7b4b06601e82f7f941d53f07
+snapshot-restore-py==1.0.0 \
+    --hash=sha256:38f99e696793790f54658e71c68c7a8a40cea877c81232b5052383b1301aceba

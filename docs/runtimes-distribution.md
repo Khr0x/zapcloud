@@ -46,6 +46,12 @@ cargo run -p xtask -- publish --runtime nodejs22.x --target linux-x86_64
 zapcloud runtimes install --runtime nodejs22.x
 ```
 
+El ensamblado usa `npm ci` con `xtask/assets/nodejs22/package-lock.json`
+y `pip --require-hashes --only-binary` con wheels fijados para CPython 3.13
+Linux amd64/arm64. Los contenedores Node y Python usados para compilación
+cruzada están fijados por digest OCI. Un SBOM ausente, malformado o vacío
+bloquea tanto el bundle como `xtask publish` antes de contactar el registry.
+
 - **Resolución en el invoke** (`zc-runtime::resolve`): cache-only, **nunca toca
   la red**. Si el bundle falta o su integridad no verifica, el cold start falla.
 - **`ensure`** (install / preflight de `serve`): lo único que baja de la red.
@@ -53,9 +59,11 @@ zapcloud runtimes install --runtime nodejs22.x
   el árbol, runtime, SO, arquitectura y versiones del manifest. Un cambio de
   `oci_digest` cuenta como cambio de pin aunque el árbol sea idéntico.
 
-> **Estado actual:** `runtimes/index.json` ya está poblado para Linux/amd64. Una
-> instalación desde un binario con cache vacía aún necesita recibir ese índice como
-> recurso versionado; `ensure` no puede descubrir el runtime sin él.
+`zapcloud` incorpora el índice revisado al compilar. Una instalación nueva no
+necesita checkout ni `index.json` dentro de la cache. Si existe
+`<storage.runtimes>/index.json`, ese archivo reemplaza el incorporado para
+upgrade o rollback; un JSON inválido falla explícitamente. El binario debe
+recompilarse para incorporar pins nuevos si no se distribuye el override.
 
 ### Actualización, reparación y rollback
 
@@ -80,6 +88,22 @@ la descarga limpia staging; tras morir el proceso, la próxima instalación limp
 staging abandonado y puede reutilizar generaciones verificadas sin activar.
 Esto cubre interrupciones de proceso; no promete durabilidad ante pérdida eléctrica
 (no hay un protocolo de `fsync` del árbol completo).
+
+### Cuota y recolección
+
+`[runtimes].max_cache_bytes` limita los bytes de generaciones conservadas bajo
+`storage.runtimes/.versions`. Tras `runtimes install` y el preflight se borran
+primero las generaciones frías más antiguas. `zapcloud runtimes gc` aplica la
+misma cuota manualmente. Un lock por generación se mantiene durante la vida del
+environment; el GC nunca borra la generación activa ni otra con referencias
+vivas. Si solo esas generaciones superan la cuota, el comando informa el exceso
+y las conserva. El límite no incluye staging temporal, el índice ni bundles
+legacy fuera de `.versions`; durante una descarga puede haber un pico transitorio.
+
+```toml
+[runtimes]
+max_cache_bytes = 1073741824 # 1 GiB para generaciones conservadas
+```
 
 **Migración del layout anterior:** la primera instalación necesita red para
 acreditar el digest OCI; un manifest local no prueba ese digest. En Linux se
