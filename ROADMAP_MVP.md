@@ -70,10 +70,9 @@ publican como OCI artifacts con `xtask publish` (push a ghcr + pin en `runtimes/
 por `oci_digest` + `tree_sha256`), y `zapcloud runtimes install` / el preflight de `serve`
 los bajan verificando digest e integridad antes de un rename atómico. Solo se distribuye el
 carril Linux; los bundles darwin siguen siendo dev-only. El índice ya contiene publicaciones,
-pero el paso sigue parcial hasta obtener CI verde del índice incorporado y la
-cuota de generaciones. `ensure` ya compara pins,
-repara corrupción y activa generaciones para upgrade/rollback; falta acreditar
-este cambio en CI. El subset Runtime API tiene evidencia RIC Linux, sin acreditar
+con CI verde del índice incorporado y la cuota de generaciones (PR #23). `ensure`
+compara pins, repara corrupción y activa generaciones para upgrade/rollback. El paso
+sigue parcial hasta que v0.1.2 cierre los gates golden y de semántica. El subset Runtime API tiene evidencia RIC Linux, sin acreditar
 paridad AWS completa (ver gates de v0.1.2).
 
 ---
@@ -119,17 +118,17 @@ La paridad contra AWS queda pendiente de golden tests. `Invoke` solo `RequestRes
 completos a los pasos 9–11. Este milestone no añade superficie nueva; convierte las
 afirmaciones actuales en comportamiento verificable.
 
-| Gate | Criterio de aceptación | Evidencia mínima |
-|---|---|---|
-| CI general | `fmt`, `check`, Clippy y tests del workspace corren en cada PR, sin skips silenciosos | Workflow separado de `runtimes.yml`; skips explícitos y visibles |
-| Runtime API | Se emiten los headers de invocación requeridos y se respetan deadline/ARN | E2E Linux con RIC Node y Python reales |
-| Golden compatibility | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
-| Runtime distribution | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
-| Publicación | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
-| Seguridad process | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
-| Semántica de ejecución | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
-| Supply chain | Lockfiles/hashes obligatorios, imágenes/actions fijadas por digest y SBOM inválido bloquea publicación | Artefactos reproducibles y gate de publicación |
-| Operación mínima | Índice disponible en instalación nueva, GC/cuotas y recuperación documentados | Prueba de instalación desde binario y de presión de disco |
+| Gate | Estado | Criterio de aceptación | Evidencia mínima |
+|---|---|---|---|
+| CI general | ✅ | `fmt`, `check`, Clippy y tests del workspace corren en cada PR, sin skips silenciosos | Workflow separado de `runtimes.yml`; skips explícitos y visibles |
+| Runtime API | ✅ subset (sin X-Ray/ClientContext/Init-error) | Se emiten los headers de invocación requeridos y se respetan deadline/ARN | E2E Linux con RIC Node y Python reales |
+| Golden compatibility | 🟡 sin referencia AWS ni casos ZIP/env/async/response-size/paginación | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
+| Runtime distribution | ✅ (PR #23) | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
+| Publicación | ✅ | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
+| Seguridad process | ✅ | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
+| Semántica de ejecución | 🟡 `MemorySize` ni aplicado ni declarado no soportado; sin referencia AWS | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
+| Supply chain | ✅ (PR #23) | Lockfiles/hashes obligatorios, imágenes/actions fijadas por digest y SBOM inválido bloquea publicación | Artefactos reproducibles y gate de publicación |
+| Operación mínima | ✅ (PR #23) | Índice disponible en instalación nueva, GC/cuotas y recuperación documentados | Prueba de instalación desde binario y de presión de disco |
 
 **CI general implementado:** [workflow CI](.github/workflows/ci.yml) con Rust fijado,
 cuatro checks independientes y omisiones explícitas. Comandos y alcance en
@@ -223,7 +222,7 @@ inválidas. Evidencia: [CI verde de PR #19 en main](https://github.com/Khr0x/zap
 Los fragmentos Node/Python publicados coinciden con las dos entradas de PR #20.
 Detalle: [distribución](docs/runtimes-distribution.md#4-flujo-de-ci).
 
-**Runtime distribution (implementado; evidencia CI pendiente):** `ensure` exige
+**Runtime distribution (gate acreditado por [PR #23](https://github.com/Khr0x/zapcloud/pull/23)):** `ensure` exige
 el pin completo del índice, verifica la integridad e identidad del bundle y
 repara/actualiza mediante generaciones conservadas y un enlace activo atómico.
 Rollback offline reutiliza una generación íntegra del pin solicitado. Los errores
@@ -421,8 +420,8 @@ incorrecta.
 
 > **Estado operativo del paso 11:** `runtimes/index.json` contiene pins publicados;
 > `ensure` aplica desired-state, reparación y rollback. El binario incorpora el
-> índice y el GC conserva generaciones activas o en uso. Falta acreditar el
-> nuevo flujo de instalación y la cuota en CI antes de cerrar operación mínima.
+> índice y el GC conserva generaciones activas o en uso. Instalación desde cache
+> vacía y cuota acreditadas en CI por la PR #23. El paso sigue 🟡 hasta cerrar v0.1.2.
 
 > **Nota de los pasos 9–10 (parciales):** el RIC de AWS (`aws-lambda-ric` / `awslambdaric`)
 > **solo compila en Linux**;

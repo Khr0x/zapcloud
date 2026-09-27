@@ -113,8 +113,8 @@ soporta el intercambio, falla sin eliminar el directorio anterior. Detén los
 daemons antiguos durante esta primera migración: pueden conservar rutas del
 layout anterior. Los upgrades posteriores entre generaciones no lo necesitan.
 
-GC/cuotas siguen pendientes: las generaciones y backups se conservan y consumen
-disco. No los borres mientras un environment pueda usarlos. El preflight mantiene
+Los backups `.previous-*` de la migración quedan fuera de la cuota y no se
+recolectan; no los borres mientras un daemon antiguo pueda usarlos. El preflight mantiene
 su política de advertir y continuar si falla; puede seguir disponible el bundle
 anterior, pero eso no acredita que el pin nuevo se haya aplicado.
 
