@@ -89,6 +89,85 @@
       }
     },
     {
+      "id": "create-page",
+      "operation": "CreateFunction",
+      "params": {
+        "FunctionName": "$page"
+      },
+      "expect": {
+        "status": 201,
+        "body": {
+          "FunctionName": "$page"
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "list-first-page",
+      "operation": "ListFunctions",
+      "params": {
+        "MaxItems": 1
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "Functions": "$array",
+          "NextMarker": "$token"
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      },
+      "capture": {
+        "$marker": "NextMarker"
+      }
+    },
+    {
+      "id": "list-next-page",
+      "operation": "ListFunctions",
+      "params": {
+        "MaxItems": 1,
+        "Marker": "$marker"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "Functions": "$array"
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "list-max-items-above-page",
+      "operation": "ListFunctions",
+      "params": {
+        "MaxItems": 10000
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "Functions": "$array"
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "delete-page",
+      "operation": "DeleteFunction",
+      "params": {
+        "FunctionName": "$page"
+      },
+      "expect": {
+        "status": 204
+      }
+    },
+    {
       "id": "invoke",
       "operation": "Invoke",
       "params": {
@@ -203,6 +282,44 @@
         }
       },
       "payload_bytes": 6291457
+    },
+    {
+      "id": "response-at-limit",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "size": 6291456
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        }
+      },
+      "payload": "{\"response_bytes\":6291456}"
+    },
+    {
+      "id": "response-over-limit",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$name"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "errorType": "Function.ResponseSizeTooLarge",
+          "errorMessage": "$message"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST",
+          "x-amz-function-error": "Unhandled"
+        }
+      },
+      "payload": "{\"response_bytes\":6300000}"
     },
     {
       "id": "invalid-json",
@@ -403,6 +520,53 @@
       "operation": "DeleteFunction",
       "params": {
         "FunctionName": "$limits"
+      },
+      "expect": {
+        "status": 204
+      }
+    },
+    {
+      "id": "create-init-exit",
+      "operation": "CreateFunction",
+      "params": {
+        "FunctionName": "$initfail",
+        "Handler": "init-exit"
+      },
+      "expect": {
+        "status": 201,
+        "body": {
+          "FunctionName": "$initfail",
+          "Handler": "init-exit"
+        },
+        "headers": {
+          "content-type": "application/json"
+        }
+      }
+    },
+    {
+      "id": "init-exit-invoke",
+      "operation": "Invoke",
+      "params": {
+        "FunctionName": "$initfail"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "errorType": "Runtime.ExitError",
+          "errorMessage": "$message"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST",
+          "x-amz-function-error": "Unhandled"
+        }
+      }
+    },
+    {
+      "id": "delete-init-exit",
+      "operation": "DeleteFunction",
+      "params": {
+        "FunctionName": "$initfail"
       },
       "expect": {
         "status": 204

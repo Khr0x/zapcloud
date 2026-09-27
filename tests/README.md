@@ -5,7 +5,7 @@ Pruebas a nivel de repo, no unitarias de crate.
 Estado actual: `support/` contiene helpers compartidos y `golden/` la matriz local
 CLI/SDK del contrato documentado. La comparación contra una captura AWS sigue pendiente.
 
-- [`golden/`](golden/README.md) — 22 casos compartidos × 3 clientes con reporte de
+- [`golden/`](golden/README.md) — 32 casos compartidos × 3 clientes con reporte de
   procedencia; CI ejecuta la base local con SigV4. Referencia AWS real aún no capturada: no
   marcar paridad como completa. Incluye comandos de captura manual y comparación (§70).
 - `isolation/` — **isolation escape tests** (§32, §82). Son **criterio de

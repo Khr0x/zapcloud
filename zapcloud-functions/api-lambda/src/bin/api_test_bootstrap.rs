@@ -7,6 +7,10 @@ use std::net::TcpStream;
 fn main() {
     let api = env::var("AWS_LAMBDA_RUNTIME_API").expect("AWS_LAMBDA_RUNTIME_API");
     let handler = env::var("_HANDLER").unwrap_or_default();
+    // Fallo de Init observable: el runtime termina antes del primer /next.
+    if handler == "init-exit" {
+        std::process::exit(1);
+    }
     let mut count = 0_u64;
 
     loop {
@@ -19,7 +23,15 @@ fn main() {
         if let Some(delay) = event["sleep_ms"].as_u64() {
             std::thread::sleep(std::time::Duration::from_millis(delay));
         }
-        let (suffix, response) = if event.get("fail").and_then(|v| v.as_bool()) == Some(true) {
+        let (suffix, response) = if let Some(size) = event["response_bytes"].as_u64() {
+            // JSON válido de exactamente `size` bytes, relleno con espacios.
+            let mut body = format!("{{\"size\":{size}}}");
+            body.extend(std::iter::repeat_n(
+                ' ',
+                (size as usize).saturating_sub(body.len()),
+            ));
+            ("response", body)
+        } else if event.get("fail").and_then(|v| v.as_bool()) == Some(true) {
             (
                 "error",
                 serde_json::json!({

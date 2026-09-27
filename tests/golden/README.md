@@ -1,7 +1,7 @@
 # Golden compatibility — base de v0.1.2
 
-Los mismos 22 casos de `cases.json` se ejecutan con **AWS CLI v2**, **SDK JavaScript v3**
-y **Boto3**, contra un daemon real con SigV4: 66 comprobaciones. Se reutiliza el fixture
+Los mismos 32 casos de `cases.json` se ejecutan con **AWS CLI v2**, **SDK JavaScript v3**
+y **Boto3**, contra un daemon real con SigV4: 96 comprobaciones. Se reutiliza el fixture
 `api_test_bootstrap` de los tests HTTP, empaquetado como ZIP `provided.al2023`.
 
 **Todavía no hay una captura de AWS revisada.** `cases.json` contiene expectativas del
@@ -18,6 +18,9 @@ el gate Golden compatibility. El job `golden` de CI y su artefacto lo indican ex
 | Payload síncrono de 6 MiB y 6 MiB + 1 | Éxito/HTTP 413; JSON con whitespace para no exceder también el límite de respuesta |
 | JSON inválido | HTTP 400 + `InvalidRequestContentException` |
 | MemorySize 127/128/10240/10241; Timeout 0/1/900/901 | Bordes válidos e inválidos de configuración; no demuestra enforcement de memoria |
+| Paginación de ListFunctions | `MaxItems=1` devuelve `NextMarker`, la página siguiente lo acepta y `MaxItems=10000` es válido (página de hasta 50) |
+| Respuesta síncrona de 6 MiB y por encima | Éxito / HTTP 200 + `Function.ResponseSizeTooLarge` con `FunctionError=Unhandled` |
+| Bootstrap que termina durante Init | HTTP 200 + `Runtime.ExitError` con `FunctionError=Unhandled`, sin esperar al timeout |
 
 Fuentes: [RFC §69–71](../../docs/rfc/lambda-zapcloud.md#69-matriz-de-compatibilidad),
 [CreateFunction](https://docs.aws.amazon.com/lambda/latest/api/API_CreateFunction.html) y
@@ -113,5 +116,9 @@ equivalen a una captura de todos los bytes HTTP.
 - Captura AWS revisada y versionada, ejecución de comparación en CI y evidencia enlazada.
 - AWS/RIE para los casos de Runtime API que correspondan: **RIE no implementa el control
   plane** Create/Get/List/Update/Delete y no sustituye una referencia AWS para esta matriz.
-- ZIP de 50 MiB, variables de entorno, invocación asíncrona, response-size y paginación.
-- Ampliar errores, schema completo y variantes del lifecycle; los 22 casos son el subset inicial.
+- ZIP de 50 MiB e invocación asíncrona. Las variables de entorno llegan con el paso 13 y
+  sus casos se añaden con esa funcionalidad.
+- `/init/error` explícito del runtime: el Runtime API process no puede atribuirlo a un
+  environment; solo se cubre la salida del proceso.
+- Ampliar errores, schema completo y variantes del lifecycle; los 32 casos son un subset.
+  Los `errorMessage` y el umbral exacto de respuesta de AWS se confirman con la captura.

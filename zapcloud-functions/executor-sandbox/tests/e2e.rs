@@ -103,6 +103,99 @@ async fn el_camino_de_error_se_propaga() {
 }
 
 #[tokio::test]
+async fn salida_del_bootstrap_en_init_es_runtime_exit_error() {
+    let exec = ProcessExecutor::start().await.unwrap();
+    let mut spec = spec();
+    spec.handler = "init.exit".into();
+    let start = std::time::Instant::now();
+    let mut env = exec.create(&spec).await.unwrap();
+    let InvokeOutcome::FunctionError(body) = exec.invoke(&mut env, b"{}").await.unwrap() else {
+        panic!("la salida en Init debía ser un error de función")
+    };
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["errorType"], "Runtime.ExitError");
+    assert!(
+        v["errorMessage"]
+            .as_str()
+            .unwrap()
+            .ends_with("exit status 3"),
+        "{v}"
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "no espera al timeout de Init"
+    );
+    assert!(env.needs_reset());
+    exec.destroy(env).await.unwrap();
+}
+
+#[tokio::test]
+async fn salida_del_bootstrap_durante_invoke_es_runtime_exit_error() {
+    let exec = ProcessExecutor::start().await.unwrap();
+    let mut env = exec.create(&spec()).await.unwrap();
+    let InvokeOutcome::FunctionError(body) =
+        exec.invoke(&mut env, br#"{"exit_code":2}"#).await.unwrap()
+    else {
+        panic!("la salida durante Invoke debía ser un error de función")
+    };
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["errorType"], "Runtime.ExitError");
+    assert!(
+        v["errorMessage"]
+            .as_str()
+            .unwrap()
+            .ends_with("exit status 2"),
+        "{v}"
+    );
+    assert!(env.needs_reset());
+    exec.destroy(env).await.unwrap();
+}
+
+#[tokio::test]
+async fn respuesta_en_el_limite_pasa_y_por_encima_es_response_size_too_large() {
+    use zc_executor_sandbox::MAX_RESPONSE_BYTES;
+    let exec = ProcessExecutor::start().await.unwrap();
+    let mut env = exec.create(&spec()).await.unwrap();
+    let at_limit = format!(r#"{{"response_bytes":{MAX_RESPONSE_BYTES}}}"#);
+    let InvokeOutcome::Success(body) = exec.invoke(&mut env, at_limit.as_bytes()).await.unwrap()
+    else {
+        panic!("una respuesta de 6 MB debía pasar")
+    };
+    assert_eq!(body.len(), MAX_RESPONSE_BYTES);
+    let over = format!(r#"{{"response_bytes":{}}}"#, MAX_RESPONSE_BYTES + 1);
+    let InvokeOutcome::FunctionError(body) = exec.invoke(&mut env, over.as_bytes()).await.unwrap()
+    else {
+        panic!("una respuesta por encima del límite debía fallar")
+    };
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["errorType"], "Function.ResponseSizeTooLarge");
+    // El environment sigue warm tras rechazar la respuesta.
+    assert!(matches!(
+        exec.invoke(&mut env, b"{}").await.unwrap(),
+        InvokeOutcome::Success(_)
+    ));
+    exec.destroy(env).await.unwrap();
+}
+
+/// Process/T1 declara `MemorySize` como no soportado: el handler puede superar
+/// su memoria configurada. Debe invertirse cuando v0.2 aplique cgroups (§35).
+#[tokio::test]
+async fn memory_size_no_se_aplica_en_process_mode() {
+    let exec = ProcessExecutor::start().await.unwrap();
+    let mut env = exec.create(&spec()).await.unwrap();
+    let result = exec
+        .invoke(&mut env, br#"{"allocate_mb":192}"#)
+        .await
+        .unwrap();
+    let InvokeOutcome::Success(body) = result else {
+        panic!("process mode no debía limitar la memoria")
+    };
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["allocated_mb"], 192);
+    exec.destroy(env).await.unwrap();
+}
+
+#[tokio::test]
 async fn entorno_hijo_no_hereda_secretos_del_daemon() {
     const CHILD_TEST: &str = "ZAPCLOUD_ENV_TEST_CHILD";
     if std::env::var_os(CHILD_TEST).is_none() {

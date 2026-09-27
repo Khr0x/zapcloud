@@ -70,10 +70,9 @@ publican como OCI artifacts con `xtask publish` (push a ghcr + pin en `runtimes/
 por `oci_digest` + `tree_sha256`), y `zapcloud runtimes install` / el preflight de `serve`
 los bajan verificando digest e integridad antes de un rename atómico. Solo se distribuye el
 carril Linux; los bundles darwin siguen siendo dev-only. El índice ya contiene publicaciones,
-pero el paso sigue parcial hasta obtener CI verde del índice incorporado y la
-cuota de generaciones. `ensure` ya compara pins,
-repara corrupción y activa generaciones para upgrade/rollback; falta acreditar
-este cambio en CI. El subset Runtime API tiene evidencia RIC Linux, sin acreditar
+con CI verde del índice incorporado y la cuota de generaciones (PR #23). `ensure`
+compara pins, repara corrupción y activa generaciones para upgrade/rollback. El paso
+sigue parcial hasta que v0.1.2 cierre los gates golden y de semántica. El subset Runtime API tiene evidencia RIC Linux, sin acreditar
 paridad AWS completa (ver gates de v0.1.2).
 
 ---
@@ -119,17 +118,17 @@ La paridad contra AWS queda pendiente de golden tests. `Invoke` solo `RequestRes
 completos a los pasos 9–11. Este milestone no añade superficie nueva; convierte las
 afirmaciones actuales en comportamiento verificable.
 
-| Gate | Criterio de aceptación | Evidencia mínima |
-|---|---|---|
-| CI general | `fmt`, `check`, Clippy y tests del workspace corren en cada PR, sin skips silenciosos | Workflow separado de `runtimes.yml`; skips explícitos y visibles |
-| Runtime API | Se emiten los headers de invocación requeridos y se respetan deadline/ARN | E2E Linux con RIC Node y Python reales |
-| Golden compatibility | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
-| Runtime distribution | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
-| Publicación | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
-| Seguridad process | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
-| Semántica de ejecución | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
-| Supply chain | Lockfiles/hashes obligatorios, imágenes/actions fijadas por digest y SBOM inválido bloquea publicación | Artefactos reproducibles y gate de publicación |
-| Operación mínima | Índice disponible en instalación nueva, GC/cuotas y recuperación documentados | Prueba de instalación desde binario y de presión de disco |
+| Gate | Estado | Criterio de aceptación | Evidencia mínima |
+|---|---|---|---|
+| CI general | ✅ | `fmt`, `check`, Clippy y tests del workspace corren en cada PR, sin skips silenciosos | Workflow separado de `runtimes.yml`; skips explícitos y visibles |
+| Runtime API | ✅ subset (sin X-Ray/ClientContext/Init-error) | Se emiten los headers de invocación requeridos y se respetan deadline/ARN | E2E Linux con RIC Node y Python reales |
+| Golden compatibility | 🟡 sin referencia AWS; faltan ZIP 50 MiB y async (env vars en paso 13) | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
+| Runtime distribution | ✅ (PR #23) | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
+| Publicación | ✅ | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
+| Seguridad process | ✅ | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
+| Semántica de ejecución | 🟡 `MemorySize` declarado no soportado; falta referencia AWS de errores | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
+| Supply chain | ✅ (PR #23) | Lockfiles/hashes obligatorios, imágenes/actions fijadas por digest y SBOM inválido bloquea publicación | Artefactos reproducibles y gate de publicación |
+| Operación mínima | ✅ (PR #23) | Índice disponible en instalación nueva, GC/cuotas y recuperación documentados | Prueba de instalación desde binario y de presión de disco |
 
 **CI general implementado:** [workflow CI](.github/workflows/ci.yml) con Rust fijado,
 cuatro checks independientes y omisiones explícitas. Comandos y alcance en
@@ -149,7 +148,9 @@ bloquea publicación antes del push. Evidencia de la [PR #23](https://github.com
 [CI general verde, incluida instalación desde cache vacía](https://github.com/Khr0x/zapcloud/actions/runs/35819236261)
 y [runtimes Linux amd64 verde para Node/Python](https://github.com/Khr0x/zapcloud/actions/runs/35819236267).
 Los bundles rechazan arquitectura distinta al host en cold start; timeout y
-payload tienen E2E, pero `MemorySize` sigue siendo metadata sin enforcement.
+payload tienen E2E. `MemorySize` se declara no soportado en process/T1: `serve`
+lo avisa al arrancar (`memory_limit=not-enforced`) y el E2E
+`memory_size_no_se_aplica_en_process_mode` fija el comportamiento hasta v0.2 (paso 18).
 La referencia AWS revisada aún no está capturada, por lo que semántica y golden
 no se declaran cerradas.
 
@@ -183,8 +184,9 @@ Los E2E Node/Python comprueban contexto, cold/warm, error, timeout y reinicio; e
 exigen los RIC nativos. El workflow `runtimes.yml` los ejecuta antes de publicar y se
 activa en PRs que cambian el executor, invocador, API, dependencias o pruebas.
 Comandos y alcance en [tests/README.md](tests/README.md). No implica paridad completa:
-X-Ray/ClientContext/Cognito e Init-error/retry aún no están cubiertos, y `MemorySize`
-sigue siendo metadata sin enforcement. La matriz golden sigue pendiente.
+X-Ray/ClientContext/Cognito, `/init/error` explícito y retry de Init aún no están cubiertos
+(la salida del bootstrap sí: `Runtime.ExitError`), y `MemorySize`
+se declara no soportado en process/T1. La matriz golden sigue pendiente.
 
 Validación local: [Linux ARM64 con RIC reales, 2026-09-22](tests/evidence/runtime-api-linux-arm64.md).
 Evidencia Linux x86_64: [runtimes verde de PR #16](https://github.com/Khr0x/zapcloud/actions/runs/35754499341)
@@ -193,18 +195,23 @@ integrado en `main`. Ambos RIC reales pasan; la instalación Python ahora fija s
 también en hosts Linux nativos.
 
 **Golden compatibility (base local; gate abierto):** [tests/golden/](tests/golden/README.md)
-comparte 22 casos entre AWS CLI v2, SDK JS v3 y Boto3 (66 comprobaciones): CRUD,
-Invoke/FunctionError, timeout y recuperación, JSON inválido y bordes de payload/configuración.
+comparte 32 casos entre AWS CLI v2, SDK JS v3 y Boto3 (96 comprobaciones): CRUD,
+Invoke/FunctionError, timeout y recuperación, JSON inválido, bordes de payload/configuración,
+paginación, tamaño de respuesta y salida del bootstrap en Init.
 CI ejecuta la matriz contra un daemon aislado con SigV4 y conserva un reporte de versiones,
 procedencia y resultados. La suite detectó y corrigió el rechazo de
-`application/octet-stream` en Invoke, formato utilizado por el SDK JS.
+`application/octet-stream` en Invoke, formato utilizado por el SDK JS. La ampliación
+corrigió tres divergencias: `MaxItems` de 51–10000 se rechazaba; una respuesta de más de
+2 MiB acababa en timeout (límite por defecto de axum) en lugar de 6 MiB +
+`Function.ResponseSizeTooLarge`; y un bootstrap que terminaba en Init esperaba 10 s y
+devolvía 500 en lugar de 200 + `Runtime.ExitError`.
 
 Las expectativas iniciales proceden del contrato documentado; **no son una captura AWS**.
 El runner incluye captura manual explícita y comparación de referencias revisadas, pero
 no se ha ejecutado contra una cuenta AWS. Faltan esa evidencia, schema/errores completos,
-ZIP/env vars, async, response-size y paginación. Este avance no cierra el gate ni v0.1.2.
+ZIP de 50 MiB y async; env vars llegan con el paso 13. Este avance no cierra el gate ni v0.1.2.
 
-Validación: [66 comprobaciones locales en Linux ARM64 y macOS](tests/evidence/golden-local.md).
+Validación: [96 comprobaciones locales en macOS ARM64; 66 previas en Linux ARM64](tests/evidence/golden-local.md).
 Pendiente acreditar el nuevo job de CI Linux x86_64 y la referencia AWS.
 
 **Publicación matricial (gate acreditado):** cada job publica en
@@ -223,7 +230,7 @@ inválidas. Evidencia: [CI verde de PR #19 en main](https://github.com/Khr0x/zap
 Los fragmentos Node/Python publicados coinciden con las dos entradas de PR #20.
 Detalle: [distribución](docs/runtimes-distribution.md#4-flujo-de-ci).
 
-**Runtime distribution (implementado; evidencia CI pendiente):** `ensure` exige
+**Runtime distribution (gate acreditado por [PR #23](https://github.com/Khr0x/zapcloud/pull/23)):** `ensure` exige
 el pin completo del índice, verifica la integridad e identidad del bundle y
 repara/actualiza mediante generaciones conservadas y un enlace activo atómico.
 Rollback offline reutiliza una generación íntegra del pin solicitado. Los errores
@@ -421,8 +428,8 @@ incorrecta.
 
 > **Estado operativo del paso 11:** `runtimes/index.json` contiene pins publicados;
 > `ensure` aplica desired-state, reparación y rollback. El binario incorpora el
-> índice y el GC conserva generaciones activas o en uso. Falta acreditar el
-> nuevo flujo de instalación y la cuota en CI antes de cerrar operación mínima.
+> índice y el GC conserva generaciones activas o en uso. Instalación desde cache
+> vacía y cuota acreditadas en CI por la PR #23. El paso sigue 🟡 hasta cerrar v0.1.2.
 
 > **Nota de los pasos 9–10 (parciales):** el RIC de AWS (`aws-lambda-ric` / `awslambdaric`)
 > **solo compila en Linux**;

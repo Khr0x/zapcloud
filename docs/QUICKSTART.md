@@ -254,7 +254,7 @@ curl -s http://127.0.0.1:9000/metrics
 ## 9. Qué NO funciona todavía (por roadmap)
 
 - **Aislamiento**: process/T1, el código **no está sandboxeado** (v0.2).
-- **Límites**: `Timeout` se aplica desde la entrega del evento al runtime. Al vencer, Invoke devuelve HTTP 200 con `X-Amz-Function-Error: Unhandled`, termina el grupo de procesos y la siguiente invocación arranca de nuevo. Init tiene un límite separado de 10 s, sin retry. `MemorySize` sigue siendo metadata; no limita la memoria del proceso.
+- **Límites**: `Timeout` se aplica desde la entrega del evento al runtime. Al vencer, Invoke devuelve HTTP 200 con `X-Amz-Function-Error: Unhandled`, termina el grupo de procesos y la siguiente invocación arranca de nuevo. Init tiene un límite separado de 10 s, sin retry; si el bootstrap termina (en Init o durante el Invoke), Invoke devuelve HTTP 200 con `Runtime.ExitError` sin esperar al timeout. La respuesta síncrona se limita a 6 MiB: por encima, `Function.ResponseSizeTooLarge`. `MemorySize` **no está soportado como límite**: se valida y se expone en `AWS_LAMBDA_FUNCTION_MEMORY_SIZE`, pero no limita la memoria del proceso. `serve` lo declara al arrancar (`memory_limit=not-enforced`); el enforcement llega con cgroups en v0.2.
 - **Arquitectura**: la arquitectura declarada todavía no selecciona un worker distinto; usa la del host.
 - **Seguridad remota**: `auth=none` solo es apropiado para loopback/laboratorio; no hay frontera contra secretos del daemon.
 - **Invoke async** (`Event`, 202): solo síncrono `RequestResponse` (v0.3).

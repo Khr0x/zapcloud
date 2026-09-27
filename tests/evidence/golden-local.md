@@ -1,4 +1,17 @@
-# Golden compatibility — evidencia local, 2026-09-22
+# Golden compatibility — evidencia local
+
+## 2026-09-26 — ampliación a 32 casos
+
+macOS 26.6.2 ARM64: **32 casos × 3 clientes = 96 aprobadas, 0 fallidas, 0 omitidas**.
+AWS CLI 2.17.27, SDK JS 3.1137.0 con Node 24.16.0, Boto3/Botocore 1.43.99 con Python 3.14.
+SHA-256 de los casos: `81607250be218aeabaf14796e397faa140503e2a53a66c18dc55428ae6a17848`.
+
+Nuevos casos: paginación de ListFunctions, respuesta síncrona en el límite y por encima,
+y bootstrap que termina durante Init. La primera ejecución de estos casos expuso tres
+divergencias que se corrigieron en el servidor (ver ROADMAP, Golden compatibility).
+Falta repetirla en Linux (job `golden` de CI). No se contactó AWS.
+
+## 2026-09-22 — base de 22 casos
 
 La matriz de `tests/golden/` pasó contra un daemon real con SigV4 y credenciales
 ficticias: **22 casos × 3 clientes = 66 aprobadas, 0 fallidas, 0 omitidas**.

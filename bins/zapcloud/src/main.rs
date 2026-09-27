@@ -203,7 +203,7 @@ async fn run_serve(config_path: PathBuf) -> Result<()> {
         .await
         .with_context(|| format!("escuchando en {listen}"))?;
     tracing::info!(%listen, region = %config.server.region, "zapcloud serve listo");
-    tracing::warn!("executor=process tier=T1 isolation=none");
+    tracing::warn!("executor=process tier=T1 isolation=none memory_limit=not-enforced");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
