@@ -113,9 +113,18 @@ fn resolve_bundle(runtimes_root: &Path, spec: &BundleSpec) -> Result<RuntimeSour
     };
     // Fijar la generación antes de verificar o devolver rutas. Un upgrade cambia
     // el enlace público, pero los environments existentes conservan sus bytes.
-    let dir = std::fs::canonicalize(runtimes_root.join(&dir_name)).map_err(|e| {
-        RuntimeError::Unavailable(format!("bundle '{dir_name}' no disponible: {e}"))
-    })?;
+    // Un único readlink del enlace público: realpath(3) de macOS lo recorre en
+    // varias syscalls y devuelve EINVAL si `activate` lo reemplaza entre ellas.
+    // El destino (una generación) no cambia, así que canonicalizarlo es seguro.
+    let public = runtimes_root.join(&dir_name);
+    let dir = match std::fs::read_link(&public) {
+        Ok(target) => Ok(runtimes_root.join(target)),
+        // No es un enlace: layout antiguo con directorio real.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Ok(public),
+        Err(e) => Err(e),
+    }
+    .and_then(std::fs::canonicalize)
+    .map_err(|e| RuntimeError::Unavailable(format!("bundle '{dir_name}' no disponible: {e}")))?;
     let managed_versions = std::fs::canonicalize(&versions).ok();
     let lease = if managed_versions
         .as_ref()
