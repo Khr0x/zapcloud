@@ -176,9 +176,10 @@ async fn list_functions(
         ));
     }
     let max_items = query.max_items.unwrap_or(PAGE_LIMIT);
-    if !(1..=PAGE_LIMIT).contains(&max_items) {
-        return Err(ApiError::invalid("MaxItems debe estar entre 1 y 50"));
+    if !(1..=MAX_ITEMS_LIMIT).contains(&max_items) {
+        return Err(ApiError::invalid("MaxItems debe estar entre 1 y 10000"));
     }
+    let max_items = max_items.min(PAGE_LIMIT);
     let after = query.marker.as_deref().map(decode_marker).transpose()?;
     let mut page = state
         .manager

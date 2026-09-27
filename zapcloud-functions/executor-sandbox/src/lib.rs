@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use axum::body::Bytes;
+use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::IntoResponse;
@@ -44,6 +44,11 @@ const REQUEST_ID_HEADER: &str = "lambda-runtime-aws-request-id";
 /// Límite de inicialización hasta el primer /next. No implementa aún el retry
 /// de Init de AWS; el Timeout de la función empieza al entregar el evento.
 const INIT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Máximo de la respuesta síncrona (6 MB, §47). Por encima, el Invoke devuelve
+/// `Function.ResponseSizeTooLarge` y el runtime recibe 413.
+pub const MAX_RESPONSE_BYTES: usize = 6 * 1024 * 1024;
+/// Intervalo con el que se comprueba, sin recolectarlo, si el bootstrap terminó.
+const EXIT_POLL: Duration = Duration::from_millis(20);
 
 /// Lo necesario para lanzar un proceso con el **contrato de entorno de §16**.
 /// En v0.1 lo construye `zc-invocation` a partir de la metadata de la función
@@ -101,6 +106,27 @@ impl Environment {
         Ok(())
     }
 
+    /// Espera a que el bootstrap termine **sin recolectarlo**: el zombie conserva
+    /// su PID, así `kill_process_group` sigue siendo seguro después. Devuelve
+    /// la descripción de salida al estilo de AWS (`exit status 1`).
+    #[cfg(unix)]
+    async fn exited(&self) -> String {
+        let Some(pid) = self.child.id() else {
+            return "exit status unknown".into();
+        };
+        loop {
+            if let Some(status) = peek_exit(pid) {
+                return status;
+            }
+            tokio::time::sleep(EXIT_POLL).await;
+        }
+    }
+
+    #[cfg(not(unix))]
+    async fn exited(&self) -> String {
+        std::future::pending().await
+    }
+
     #[cfg(unix)]
     fn kill_process_group(&mut self) -> std::io::Result<()> {
         // No señalar otra vez tras SIGKILL (también desde cancelación/Drop).
@@ -118,13 +144,39 @@ impl Environment {
         // pertenece a este Child aún no recolectado. No se pasan punteros.
         if unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) } == -1 {
             let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
+            // macOS responde EPERM si el grupo solo contiene zombies: el líder
+            // sigue sin recolectar, así que no puede ser un grupo ajeno.
+            let zombies_only =
+                cfg!(target_os = "macos") && error.raw_os_error() == Some(libc::EPERM);
+            if error.raw_os_error() != Some(libc::ESRCH) && !zombies_only {
                 return Err(error);
             }
         }
         self.group_terminated = true;
         Ok(())
     }
+}
+
+/// Consulta sin bloquear ni recolectar si `pid` terminó.
+#[cfg(unix)]
+fn peek_exit(pid: u32) -> Option<String> {
+    // SAFETY: siginfo_t es POD; waitid solo escribe en él. WNOWAIT deja al hijo
+    // sin recolectar y WNOHANG evita bloquear el runtime.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    if unsafe { libc::waitid(libc::P_PID, pid, &mut info, flags) } == -1 {
+        return Some("exit status unknown".into());
+    }
+    // SAFETY: tras waitid con WEXITED, si_pid/si_status son válidos.
+    if unsafe { info.si_pid() } == 0 {
+        return None;
+    }
+    let status = unsafe { info.si_status() };
+    Some(if info.si_code == libc::CLD_EXITED {
+        format!("exit status {status}")
+    } else {
+        format!("signal: {status}")
+    })
 }
 
 /// Al cancelar el Invoke también se detiene el proceso. El invocador recrea
@@ -340,8 +392,24 @@ impl ProcessExecutor {
                 .context("timeout durante Init")?
                 .context("el Runtime API no entregó el evento")?;
             Ok::<_, anyhow::Error>(tokio::time::timeout_at(deadline, rx).await)
-        }
-        .await;
+        };
+        // Si el bootstrap muere (en Init o con el evento en curso), AWS responde
+        // 200 + `Runtime.ExitError` en lugar de esperar al timeout.
+        let result = tokio::select! {
+            // Una respuesta ya entregada gana a una salida posterior del proceso.
+            biased;
+            result = result => result,
+            status = guard.0.exited() => {
+                self.state.pending.lock().await.remove(&request_id);
+                guard.0.terminate().await?;
+                return Ok(InvokeOutcome::FunctionError(serde_json::to_vec(
+                    &serde_json::json!({
+                        "errorType": "Runtime.ExitError",
+                        "errorMessage": format!("RequestId: {request_id} Error: Runtime exited with error: {status}"),
+                    }),
+                )?));
+            }
+        };
         self.state.pending.lock().await.remove(&request_id);
         match result {
             Ok(Ok(Ok(outcome))) => {
@@ -427,17 +495,33 @@ async fn next_invocation(State(st): State<RuntimeApiState>) -> impl IntoResponse
 async fn invocation_response(
     Path(id): Path<String>,
     State(st): State<RuntimeApiState>,
-    body: Bytes,
+    body: Body,
 ) -> StatusCode {
-    complete_invocation(st, id, InvokeOutcome::Success(body.to_vec())).await
+    match axum::body::to_bytes(body, MAX_RESPONSE_BYTES).await {
+        Ok(body) => complete_invocation(st, id, InvokeOutcome::Success(body.to_vec())).await,
+        Err(_) => {
+            let error = serde_json::json!({
+                "errorType": "Function.ResponseSizeTooLarge",
+                "errorMessage": format!("Response payload size exceeded maximum allowed payload size ({MAX_RESPONSE_BYTES} bytes)."),
+            });
+            let outcome = InvokeOutcome::FunctionError(error.to_string().into_bytes());
+            match complete_invocation(st, id, outcome).await {
+                StatusCode::ACCEPTED => StatusCode::PAYLOAD_TOO_LARGE,
+                status => status,
+            }
+        }
+    }
 }
 
 /// `POST .../invocation/{id}/error` — el handler falló (§16, framing de error).
 async fn invocation_error(
     Path(id): Path<String>,
     State(st): State<RuntimeApiState>,
-    body: Bytes,
+    body: Body,
 ) -> StatusCode {
+    let Ok(body) = axum::body::to_bytes(body, MAX_RESPONSE_BYTES).await else {
+        return StatusCode::PAYLOAD_TOO_LARGE;
+    };
     complete_invocation(st, id, InvokeOutcome::FunctionError(body.to_vec())).await
 }
 

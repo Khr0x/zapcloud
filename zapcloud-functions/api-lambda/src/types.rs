@@ -8,6 +8,8 @@ use zc_invocation::Invoker;
 pub(crate) const CREATE_BODY_LIMIT: usize = 70 * 1024 * 1024;
 pub(crate) const INVOKE_BODY_LIMIT: usize = 6 * 1024 * 1024;
 pub(crate) const PAGE_LIMIT: usize = 50;
+/// Rango válido de `MaxItems`; AWS lo acepta pero nunca devuelve más de 50.
+pub(crate) const MAX_ITEMS_LIMIT: usize = 10_000;
 
 #[derive(Clone)]
 pub(crate) struct ApiState {

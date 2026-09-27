@@ -370,6 +370,41 @@ async fn valida_errores_de_entrada_y_paginacion() {
         1
     );
 
+    // AWS acepta MaxItems hasta 10000 y limita la página a 50.
+    let above_page = app
+        .clone()
+        .oneshot(
+            Request::get("/2015-03-31/functions?MaxItems=10000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(above_page.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(above_page).await["Functions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    for invalid in ["0", "10001"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/2015-03-31/functions?MaxItems={invalid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "MaxItems={invalid}"
+        );
+    }
+
     let invalid_query = app
         .clone()
         .oneshot(

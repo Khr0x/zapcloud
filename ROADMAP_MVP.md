@@ -122,7 +122,7 @@ afirmaciones actuales en comportamiento verificable.
 |---|---|---|---|
 | CI general | ✅ | `fmt`, `check`, Clippy y tests del workspace corren en cada PR, sin skips silenciosos | Workflow separado de `runtimes.yml`; skips explícitos y visibles |
 | Runtime API | ✅ subset (sin X-Ray/ClientContext/Init-error) | Se emiten los headers de invocación requeridos y se respetan deadline/ARN | E2E Linux con RIC Node y Python reales |
-| Golden compatibility | 🟡 sin referencia AWS ni casos ZIP/env/async/response-size/paginación | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
+| Golden compatibility | 🟡 sin referencia AWS; faltan ZIP 50 MiB y async (env vars en paso 13) | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
 | Runtime distribution | ✅ (PR #23) | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
 | Publicación | ✅ | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
 | Seguridad process | ✅ | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
@@ -184,7 +184,8 @@ Los E2E Node/Python comprueban contexto, cold/warm, error, timeout y reinicio; e
 exigen los RIC nativos. El workflow `runtimes.yml` los ejecuta antes de publicar y se
 activa en PRs que cambian el executor, invocador, API, dependencias o pruebas.
 Comandos y alcance en [tests/README.md](tests/README.md). No implica paridad completa:
-X-Ray/ClientContext/Cognito e Init-error/retry aún no están cubiertos, y `MemorySize`
+X-Ray/ClientContext/Cognito, `/init/error` explícito y retry de Init aún no están cubiertos
+(la salida del bootstrap sí: `Runtime.ExitError`), y `MemorySize`
 se declara no soportado en process/T1. La matriz golden sigue pendiente.
 
 Validación local: [Linux ARM64 con RIC reales, 2026-09-22](tests/evidence/runtime-api-linux-arm64.md).
@@ -194,18 +195,23 @@ integrado en `main`. Ambos RIC reales pasan; la instalación Python ahora fija s
 también en hosts Linux nativos.
 
 **Golden compatibility (base local; gate abierto):** [tests/golden/](tests/golden/README.md)
-comparte 22 casos entre AWS CLI v2, SDK JS v3 y Boto3 (66 comprobaciones): CRUD,
-Invoke/FunctionError, timeout y recuperación, JSON inválido y bordes de payload/configuración.
+comparte 32 casos entre AWS CLI v2, SDK JS v3 y Boto3 (96 comprobaciones): CRUD,
+Invoke/FunctionError, timeout y recuperación, JSON inválido, bordes de payload/configuración,
+paginación, tamaño de respuesta y salida del bootstrap en Init.
 CI ejecuta la matriz contra un daemon aislado con SigV4 y conserva un reporte de versiones,
 procedencia y resultados. La suite detectó y corrigió el rechazo de
-`application/octet-stream` en Invoke, formato utilizado por el SDK JS.
+`application/octet-stream` en Invoke, formato utilizado por el SDK JS. La ampliación
+corrigió tres divergencias: `MaxItems` de 51–10000 se rechazaba; una respuesta de más de
+2 MiB acababa en timeout (límite por defecto de axum) en lugar de 6 MiB +
+`Function.ResponseSizeTooLarge`; y un bootstrap que terminaba en Init esperaba 10 s y
+devolvía 500 en lugar de 200 + `Runtime.ExitError`.
 
 Las expectativas iniciales proceden del contrato documentado; **no son una captura AWS**.
 El runner incluye captura manual explícita y comparación de referencias revisadas, pero
 no se ha ejecutado contra una cuenta AWS. Faltan esa evidencia, schema/errores completos,
-ZIP/env vars, async, response-size y paginación. Este avance no cierra el gate ni v0.1.2.
+ZIP de 50 MiB y async; env vars llegan con el paso 13. Este avance no cierra el gate ni v0.1.2.
 
-Validación: [66 comprobaciones locales en Linux ARM64 y macOS](tests/evidence/golden-local.md).
+Validación: [96 comprobaciones locales en macOS ARM64; 66 previas en Linux ARM64](tests/evidence/golden-local.md).
 Pendiente acreditar el nuevo job de CI Linux x86_64 y la referencia AWS.
 
 **Publicación matricial (gate acreditado):** cada job publica en

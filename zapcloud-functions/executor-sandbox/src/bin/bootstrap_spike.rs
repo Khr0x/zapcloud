@@ -24,6 +24,9 @@ fn main() {
     if handler == "delayed.init" {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
+    if handler == "init.exit" {
+        std::process::exit(3);
+    }
     let base = format!("http://{api}{}", "/2018-06-01/runtime");
 
     let client = reqwest::blocking::Client::new();
@@ -92,6 +95,21 @@ fn handle(event: &str, handler: &str) -> Result<String, String> {
     if parsed.get("inspect_env").and_then(|v| v.as_bool()) == Some(true) {
         let environment: std::collections::BTreeMap<_, _> = env::vars().collect();
         return Ok(serde_json::json!(environment).to_string());
+    }
+
+    // El proceso muere con el evento en curso.
+    if let Some(code) = parsed.get("exit_code").and_then(|v| v.as_i64()) {
+        std::process::exit(code as i32);
+    }
+
+    // Respuesta JSON válida de exactamente `response_bytes` bytes.
+    if let Some(size) = parsed.get("response_bytes").and_then(|v| v.as_u64()) {
+        let mut json = format!("{{\"size\":{size}}}");
+        json.extend(std::iter::repeat_n(
+            ' ',
+            (size as usize).saturating_sub(json.len()),
+        ));
+        return Ok(json);
     }
 
     // Sonda de memoria: reserva y toca `allocate_mb` MB residentes.

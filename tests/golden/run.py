@@ -129,6 +129,10 @@ def project(actual, expected, path="body"):
     if expected == "$array":
         assert isinstance(actual, list), f"{path}: expected array"
         return "$array"
+    if expected == "$token":
+        # Opaque, per-run value (e.g. NextMarker): presence only.
+        assert isinstance(actual, str) and actual, f"{path}: expected an opaque token"
+        return "$token"
     if expected == "$message":
         assert isinstance(actual, str) and actual, f"{path}: expected an error message"
         return "$message"
@@ -152,7 +156,7 @@ def observe(result, expected, variables):
     if expected["status"] == 200 and "error" not in expected and "x-amz-function-error" not in expected.get("headers", {}):
         assert "x-amz-function-error" not in headers, "unexpected FunctionError"
     # Names/ARNs are unique per run; preserve all other selected body values.
-    reverse = {value: key for key, value in variables.items() if key in ("$name", "$limits", "$arn")}
+    reverse = {value: key for key, value in variables.items() if key in ("$name", "$limits", "$page", "$initfail", "$arn")}
     return substitute(stable, reverse)
 
 
@@ -223,7 +227,8 @@ def matrix(args, work, endpoint, report):
     suite = json.loads((HERE / "cases.json").read_text())
     for client in args.clients.split(","):
         name = f"zc-golden-{client}-{uuid.uuid4().hex[:10]}"
-        variables = {"$name": name, "$limits": name + "-limits", "$role": args.role,
+        variables = {"$name": name, "$limits": name + "-limits", "$page": name + "-page",
+                     "$initfail": name + "-initfail", "$role": args.role,
                      "$architecture": args.architecture,
                      "$arn": f"arn:aws:lambda:{args.region}:{args.role.split(':')[4]}:function:{name}",
                      "$zip": package(args.bootstrap, "v1"), "$zip2": package(args.bootstrap, "v2")}
@@ -260,6 +265,8 @@ def matrix(args, work, endpoint, report):
                 try:
                     record["observed"] = observe(result, case["expect"], variables)
                     record["passed"] = True
+                    for variable, field in case.get("capture", {}).items():
+                        variables[variable] = result["body"][field]
                 except AssertionError as error:
                     record.update(passed=False, mismatch=str(error), status=result["status"], error=result.get("error"))
                 report["results"].append(record)
