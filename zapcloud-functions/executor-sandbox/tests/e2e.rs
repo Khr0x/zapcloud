@@ -102,6 +102,24 @@ async fn el_camino_de_error_se_propaga() {
     exec.destroy(env).await.expect("destroy del environment");
 }
 
+/// Process/T1 declara `MemorySize` como no soportado: el handler puede superar
+/// su memoria configurada. Debe invertirse cuando v0.2 aplique cgroups (§35).
+#[tokio::test]
+async fn memory_size_no_se_aplica_en_process_mode() {
+    let exec = ProcessExecutor::start().await.unwrap();
+    let mut env = exec.create(&spec()).await.unwrap();
+    let result = exec
+        .invoke(&mut env, br#"{"allocate_mb":192}"#)
+        .await
+        .unwrap();
+    let InvokeOutcome::Success(body) = result else {
+        panic!("process mode no debía limitar la memoria")
+    };
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["allocated_mb"], 192);
+    exec.destroy(env).await.unwrap();
+}
+
 #[tokio::test]
 async fn entorno_hijo_no_hereda_secretos_del_daemon() {
     const CHILD_TEST: &str = "ZAPCLOUD_ENV_TEST_CHILD";

@@ -126,7 +126,7 @@ afirmaciones actuales en comportamiento verificable.
 | Runtime distribution | ✅ (PR #23) | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
 | Publicación | ✅ | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
 | Seguridad process | ✅ | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
-| Semántica de ejecución | 🟡 `MemorySize` ni aplicado ni declarado no soportado; sin referencia AWS | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
+| Semántica de ejecución | 🟡 `MemorySize` declarado no soportado; falta referencia AWS de errores | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
 | Supply chain | ✅ (PR #23) | Lockfiles/hashes obligatorios, imágenes/actions fijadas por digest y SBOM inválido bloquea publicación | Artefactos reproducibles y gate de publicación |
 | Operación mínima | ✅ (PR #23) | Índice disponible en instalación nueva, GC/cuotas y recuperación documentados | Prueba de instalación desde binario y de presión de disco |
 
@@ -148,7 +148,9 @@ bloquea publicación antes del push. Evidencia de la [PR #23](https://github.com
 [CI general verde, incluida instalación desde cache vacía](https://github.com/Khr0x/zapcloud/actions/runs/35819236261)
 y [runtimes Linux amd64 verde para Node/Python](https://github.com/Khr0x/zapcloud/actions/runs/35819236267).
 Los bundles rechazan arquitectura distinta al host en cold start; timeout y
-payload tienen E2E, pero `MemorySize` sigue siendo metadata sin enforcement.
+payload tienen E2E. `MemorySize` se declara no soportado en process/T1: `serve`
+lo avisa al arrancar (`memory_limit=not-enforced`) y el E2E
+`memory_size_no_se_aplica_en_process_mode` fija el comportamiento hasta v0.2 (paso 18).
 La referencia AWS revisada aún no está capturada, por lo que semántica y golden
 no se declaran cerradas.
 
@@ -183,7 +185,7 @@ exigen los RIC nativos. El workflow `runtimes.yml` los ejecuta antes de publicar
 activa en PRs que cambian el executor, invocador, API, dependencias o pruebas.
 Comandos y alcance en [tests/README.md](tests/README.md). No implica paridad completa:
 X-Ray/ClientContext/Cognito e Init-error/retry aún no están cubiertos, y `MemorySize`
-sigue siendo metadata sin enforcement. La matriz golden sigue pendiente.
+se declara no soportado en process/T1. La matriz golden sigue pendiente.
 
 Validación local: [Linux ARM64 con RIC reales, 2026-09-22](tests/evidence/runtime-api-linux-arm64.md).
 Evidencia Linux x86_64: [runtimes verde de PR #16](https://github.com/Khr0x/zapcloud/actions/runs/35754499341)

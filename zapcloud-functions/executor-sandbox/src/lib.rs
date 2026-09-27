@@ -62,7 +62,8 @@ pub struct FunctionSpec {
     /// process mode sin chroot es un placeholder; para `provided.al2023` el
     /// bootstrap vive en `task_root`. Lo usarán los bundles Node/Python (v0.1.1).
     pub runtime_dir: PathBuf,
-    /// `AWS_LAMBDA_FUNCTION_MEMORY_SIZE` (MB). En v0.2 se traduce a cgroups (§35).
+    /// `AWS_LAMBDA_FUNCTION_MEMORY_SIZE` (MB). En process mode es solo metadata:
+    /// no se aplica ningún límite. En v0.2 se traduce a cgroups (§35).
     pub memory_size: i64,
     /// `AWS_REGION`. En local, coherente con el ARN `local-1` (§56).
     pub region: String,

@@ -94,6 +94,13 @@ fn handle(event: &str, handler: &str) -> Result<String, String> {
         return Ok(serde_json::json!(environment).to_string());
     }
 
+    // Sonda de memoria: reserva y toca `allocate_mb` MB residentes.
+    if let Some(mb) = parsed.get("allocate_mb").and_then(|v| v.as_u64()) {
+        let block = vec![1u8; mb as usize * 1024 * 1024];
+        let touched = block.iter().step_by(4096).map(|&b| b as u64).sum::<u64>();
+        return Ok(serde_json::json!({ "allocated_mb": mb, "pages": touched }).to_string());
+    }
+
     let out = serde_json::json!({
         "handled": parsed,
         "handler": handler,
