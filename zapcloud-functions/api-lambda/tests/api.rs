@@ -308,6 +308,8 @@ async fn crud_invoke_update_y_delete_end_to_end() {
         .await
         .unwrap();
     assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert_eq!(deleted.headers()[header::CONTENT_TYPE], "application/json");
+    assert!(to_bytes(deleted.into_body(), 0).await.unwrap().is_empty());
 
     let missing = app
         .oneshot(
@@ -575,7 +577,7 @@ async fn valida_errores_de_entrada_y_paginacion() {
     assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(
         oversized.headers()["x-amzn-errortype"],
-        "RequestTooLargeException"
+        "RequestEntityTooLargeException"
     );
 }
 

@@ -4,9 +4,10 @@ Los mismos 32 casos de `cases.json` se ejecutan con **AWS CLI v2**, **SDK JavaSc
 y **Boto3**, contra un daemon real con SigV4: 96 comprobaciones. Se reutiliza el fixture
 `api_test_bootstrap` de los tests HTTP, empaquetado como ZIP `provided.al2023`.
 
-**Todavía no hay una captura de AWS revisada.** `cases.json` contiene expectativas del
-contrato documentado, no resultados observados en AWS. Pasar esta suite local no cierra
-el gate Golden compatibility. El job `golden` de CI y su artefacto lo indican explícitamente.
+**La referencia AWS revisada vive en [`aws-reference.json`](aws-reference.json).** Fue
+capturada el 2026-10-17/18 en `us-east-2`/`x86_64` con AWS CLI 2.17.27, SDK JS 3.1137.0 y
+Boto3/Botocore 1.43.99: 96/96 PASS. La matriz local contra ella termina `matched`. El job
+`golden` de CI la detecta y falla ante cualquier divergencia.
 
 ## Cobertura
 
@@ -17,7 +18,7 @@ el gate Golden compatibility. El job `golden` de CI y su artefacto lo indican ex
 | Duplicado y función inexistente | HTTP 409/404, código interpretado por cada SDK, header de error y mensaje no vacío |
 | Payload síncrono de 6 MiB y 6 MiB + 1 | Éxito/HTTP 413; JSON con whitespace para no exceder también el límite de respuesta |
 | JSON inválido | HTTP 400 + `InvalidRequestContentException` |
-| MemorySize 127/128/10240/10241; Timeout 0/1/900/901 | Bordes válidos e inválidos de configuración; no demuestra enforcement de memoria |
+| MemorySize 127/128/3008/10241; Timeout 0/1/900/901 | Bordes válidos e inválidos de configuración; no demuestra enforcement de memoria |
 | Paginación de ListFunctions | `MaxItems=1` devuelve `NextMarker`, la página siguiente lo acepta y `MaxItems=10000` es válido (página de hasta 50) |
 | Respuesta síncrona de 6 MiB y por encima | Éxito / HTTP 200 + `Function.ResponseSizeTooLarge` con `FunctionError=Unhandled` |
 | Bootstrap que termina durante Init | HTTP 200 + `Runtime.ExitError` con `FunctionError=Unhandled`, sin esperar al timeout |
@@ -70,8 +71,7 @@ ejecuta y puede generar cargos. No se ejecuta en CI ni como parte de la validaci
 Requiere una cuenta de prueba, permisos Lambda y `iam:PassRole`, un rol de ejecución Lambda
 existente y el fixture compilado para Linux compatible con AL2023 y con la arquitectura
 elegida. Un binario de macOS o enlazado contra una glibc más reciente no es válido; se puede
-compilar estático con musl en Linux. Los comandos de captura aún no han sido validados contra
-una cuenta AWS en este repositorio.
+compilar estático con musl en Linux. Los comandos de captura se validaron el 2026-10-17/18 en una cuenta AWS de prueba.
 
 ```sh
 tests/golden/.venv/bin/python tests/golden/run.py --aws \
@@ -94,7 +94,7 @@ tests/golden/.venv/bin/python tests/golden/run.py \
   --reference tests/golden/results/aws-reference.json
 ```
 
-Tras revisar el reporte AWS, guardarlo en `tests/golden/aws-reference.json`.
+El reporte revisado se guardó en `tests/golden/aws-reference.json` (`reference_status: reviewed`).
 El job `golden` de CI detecta ese archivo y falla si cualquier observable local
 difiere de la captura. Sin el archivo, el reporte queda en `not-captured` y el
 gate continúa abierto.
@@ -107,13 +107,13 @@ una atestación criptográfica del origen.
 Se normalizan nombres/ARNs generados, parámetros de Content-Type, duración/texto variable
 del timeout y redacción de mensajes de error del servicio. Se comparan los status, códigos,
 headers seleccionados y campos JSON declarados en cada caso. Se excluyen request IDs,
-timestamps, PID, hashes de código y campos adicionales; List comprueba el tipo array,
-no acredita todavía paginación ni el esquema completo. Las respuestas de los SDK no
+timestamps, PID, hashes de código y campos adicionales. List comprueba el tipo array y
+la paginación básica. Las respuestas de los SDK no
 equivalen a una captura de todos los bytes HTTP.
 
 ## Pendiente para cerrar el gate
 
-- Captura AWS revisada y versionada, ejecución de comparación en CI y evidencia enlazada.
+- Acreditar el job `golden` de CI Linux x86_64 contra la referencia revisada.
 - AWS/RIE para los casos de Runtime API que correspondan: **RIE no implementa el control
   plane** Create/Get/List/Update/Delete y no sustituye una referencia AWS para esta matriz.
 - ZIP de 50 MiB e invocación asíncrona. Las variables de entorno llegan con el paso 13 y
@@ -121,4 +121,4 @@ equivalen a una captura de todos los bytes HTTP.
 - `/init/error` explícito del runtime: el Runtime API process no puede atribuirlo a un
   environment; solo se cubre la salida del proceso.
 - Ampliar errores, schema completo y variantes del lifecycle; los 32 casos son un subset.
-  Los `errorMessage` y el umbral exacto de respuesta de AWS se confirman con la captura.
+  Los `errorMessage` y el umbral exacto de respuesta de AWS quedan confirmados por la captura.

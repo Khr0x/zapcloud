@@ -1,0 +1,1634 @@
+{
+  "schema": 1,
+  "provider": "aws-lambda",
+  "reference_status": "reviewed",
+  "recorded_at": "2026-10-18T00:19:04Z",
+  "cases_sha256": "7d82176d8336be2cd1ea17263902a319a9fa32f3a695d8ae55245cd62270602e",
+  "fixture_sha256": "d4df489910ae3e62aa96cae45b29bd0bb4081d7fc5b0a63101d8251d2621470c",
+  "fixture_source_sha256": "bf3fdcb14efb978514cc1c7d0110a02b5184c44991069ca0187158daec08039d",
+  "region": "us-east-2",
+  "architecture": "x86_64",
+  "versions": {
+    "boto3": "1.43.99",
+    "botocore": "1.43.99",
+    "node": "v24.16.0",
+    "aws_cli": "aws-cli/2.17.27",
+    "javascript": "3.1137.0"
+  },
+  "results": [
+    {
+      "client": "cli",
+      "case": "create",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "x86_64"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "duplicate",
+      "observed": {
+        "status": 409,
+        "error": "ResourceConflictException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceConflictException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "get",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Configuration": {
+            "FunctionName": "$name",
+            "FunctionArn": "$arn",
+            "Runtime": "provided.al2023",
+            "Handler": "bootstrap",
+            "MemorySize": 128,
+            "Timeout": 1,
+            "Version": "$LATEST",
+            "Architectures": [
+              "x86_64"
+            ]
+          }
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "list",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "create-page",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$page"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "list-first-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array",
+          "NextMarker": "$token"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "list-next-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "list-max-items-above-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "delete-page",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "invoke",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {
+            "golden": true
+          },
+          "handler": "bootstrap",
+          "arn": "$arn"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "handler-error",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "HandlerError",
+          "errorMessage": "fallo solicitado por el evento"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "timeout",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Sandbox.Timedout",
+          "errorMessage": "$timeout"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "after-timeout",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {},
+          "count": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "payload-at-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "size": 2
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "payload-over-limit",
+      "observed": {
+        "status": 413,
+        "error": "RequestEntityTooLargeException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "RequestEntityTooLargeException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "response-at-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "size": 6291456
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "response-over-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Function.ResponseSizeTooLarge",
+          "errorMessage": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "invalid-json",
+      "observed": {
+        "status": 400,
+        "error": "InvalidRequestContentException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "InvalidRequestContentException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "update-code",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "x86_64"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "after-update",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {},
+          "count": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "delete",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "missing-get",
+      "observed": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "missing-invoke",
+      "observed": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "memory-below",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "memory-above",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "timeout-below",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "timeout-above",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "config-upper-bounds",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$limits",
+          "MemorySize": 3008,
+          "Timeout": 900
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "delete-upper-bounds",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "create-init-exit",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$initfail",
+          "Handler": "init-exit"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "init-exit-invoke",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Runtime.ExitError",
+          "errorMessage": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "cli",
+      "case": "delete-init-exit",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "create",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "x86_64"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "duplicate",
+      "observed": {
+        "status": 409,
+        "error": "ResourceConflictException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceConflictException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "get",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Configuration": {
+            "FunctionName": "$name",
+            "FunctionArn": "$arn",
+            "Runtime": "provided.al2023",
+            "Handler": "bootstrap",
+            "MemorySize": 128,
+            "Timeout": 1,
+            "Version": "$LATEST",
+            "Architectures": [
+              "x86_64"
+            ]
+          }
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "list",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "create-page",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$page"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "list-first-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array",
+          "NextMarker": "$token"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "list-next-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "list-max-items-above-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "delete-page",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "invoke",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {
+            "golden": true
+          },
+          "handler": "bootstrap",
+          "arn": "$arn"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "handler-error",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "HandlerError",
+          "errorMessage": "fallo solicitado por el evento"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "timeout",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Sandbox.Timedout",
+          "errorMessage": "$timeout"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "after-timeout",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {},
+          "count": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "payload-at-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "size": 2
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "payload-over-limit",
+      "observed": {
+        "status": 413,
+        "error": "RequestEntityTooLargeException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "RequestEntityTooLargeException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "response-at-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "size": 6291456
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "response-over-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Function.ResponseSizeTooLarge",
+          "errorMessage": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "invalid-json",
+      "observed": {
+        "status": 400,
+        "error": "InvalidRequestContentException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "InvalidRequestContentException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "update-code",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "x86_64"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "after-update",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {},
+          "count": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "delete",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "missing-get",
+      "observed": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "missing-invoke",
+      "observed": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "memory-below",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "memory-above",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "timeout-below",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "timeout-above",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "config-upper-bounds",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$limits",
+          "MemorySize": 3008,
+          "Timeout": 900
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "delete-upper-bounds",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "create-init-exit",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$initfail",
+          "Handler": "init-exit"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "init-exit-invoke",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Runtime.ExitError",
+          "errorMessage": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "javascript",
+      "case": "delete-init-exit",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "create",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "x86_64"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "duplicate",
+      "observed": {
+        "status": 409,
+        "error": "ResourceConflictException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceConflictException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "get",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Configuration": {
+            "FunctionName": "$name",
+            "FunctionArn": "$arn",
+            "Runtime": "provided.al2023",
+            "Handler": "bootstrap",
+            "MemorySize": 128,
+            "Timeout": 1,
+            "Version": "$LATEST",
+            "Architectures": [
+              "x86_64"
+            ]
+          }
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "list",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "create-page",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$page"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "list-first-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array",
+          "NextMarker": "$token"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "list-next-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "list-max-items-above-page",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "Functions": "$array"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "delete-page",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "invoke",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {
+            "golden": true
+          },
+          "handler": "bootstrap",
+          "arn": "$arn"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "handler-error",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "HandlerError",
+          "errorMessage": "fallo solicitado por el evento"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "timeout",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Sandbox.Timedout",
+          "errorMessage": "$timeout"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "after-timeout",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {},
+          "count": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "payload-at-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "size": 2
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "payload-over-limit",
+      "observed": {
+        "status": 413,
+        "error": "RequestEntityTooLargeException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "RequestEntityTooLargeException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "response-at-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "size": 6291456
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "response-over-limit",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Function.ResponseSizeTooLarge",
+          "errorMessage": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "invalid-json",
+      "observed": {
+        "status": 400,
+        "error": "InvalidRequestContentException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "InvalidRequestContentException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "update-code",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$name",
+          "FunctionArn": "$arn",
+          "Runtime": "provided.al2023",
+          "Handler": "bootstrap",
+          "MemorySize": 128,
+          "Timeout": 1,
+          "Version": "$LATEST",
+          "Architectures": [
+            "x86_64"
+          ]
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "after-update",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "echo": {},
+          "count": 1
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "delete",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "missing-get",
+      "observed": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "missing-invoke",
+      "observed": {
+        "status": 404,
+        "error": "ResourceNotFoundException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ResourceNotFoundException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "memory-below",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "memory-above",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "timeout-below",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "timeout-above",
+      "observed": {
+        "status": 400,
+        "error": "ValidationException",
+        "headers": {
+          "content-type": "application/json",
+          "x-amzn-errortype": "ValidationException"
+        },
+        "body": {
+          "message": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "config-upper-bounds",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$limits",
+          "MemorySize": 3008,
+          "Timeout": 900
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "delete-upper-bounds",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "create-init-exit",
+      "observed": {
+        "status": 201,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "FunctionName": "$initfail",
+          "Handler": "init-exit"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "init-exit-invoke",
+      "observed": {
+        "status": 200,
+        "error": null,
+        "headers": {
+          "content-type": "application/json",
+          "x-amz-function-error": "Unhandled",
+          "x-amz-executed-version": "$LATEST"
+        },
+        "body": {
+          "errorType": "Runtime.ExitError",
+          "errorMessage": "$message"
+        }
+      },
+      "passed": true
+    },
+    {
+      "client": "python",
+      "case": "delete-init-exit",
+      "observed": {
+        "status": 204,
+        "error": null,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "passed": true
+    }
+  ],
+  "reviewed_at": "2026-10-17",
+  "reviewed_by": "maintainer",
+  "review_notes": "96/96 PASS; us-east-2/x86_64; 32 casos x 3 clientes; ver ZC-001-Resultados-2026-10-17"
+}

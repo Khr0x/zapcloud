@@ -250,7 +250,8 @@ def matrix(args, work, endpoint, report):
                 if case["operation"] == "Invoke":
                     payload = case.get("payload", "{}")
                     if "payload_bytes" in case:
-                        payload = "{}" + " " * (case["payload_bytes"] - 2)
+                        prefix = case.get("payload", "{}")
+                        payload = prefix + " " * (case["payload_bytes"] - len(prefix))
                     params["Payload"] = base64.b64encode(payload.encode()).decode()
                 result = call(case["operation"], params)
                 if case["operation"] == "CreateFunction" and result["status"] == 201:

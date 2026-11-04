@@ -5,9 +5,10 @@ use serde::Serialize;
 /// Errores observables que usa la superficie Lambda de v0.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AwsErrorCode {
+    Validation,
     InvalidParameterValue,
     InvalidRequestContent,
-    RequestTooLarge,
+    RequestEntityTooLarge,
     UnsupportedMediaType,
     ResourceNotFound,
     ResourceConflict,
@@ -22,9 +23,10 @@ pub enum AwsErrorCode {
 impl AwsErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Validation => "ValidationException",
             Self::InvalidParameterValue => "InvalidParameterValueException",
             Self::InvalidRequestContent => "InvalidRequestContentException",
-            Self::RequestTooLarge => "RequestTooLargeException",
+            Self::RequestEntityTooLarge => "RequestEntityTooLargeException",
             Self::UnsupportedMediaType => "UnsupportedMediaTypeException",
             Self::ResourceNotFound => "ResourceNotFoundException",
             Self::ResourceConflict => "ResourceConflictException",
@@ -39,8 +41,11 @@ impl AwsErrorCode {
 
     pub const fn status_code(self) -> u16 {
         match self {
-            Self::InvalidParameterValue | Self::InvalidRequestContent | Self::RequestExpired => 400,
-            Self::RequestTooLarge => 413,
+            Self::Validation
+            | Self::InvalidParameterValue
+            | Self::InvalidRequestContent
+            | Self::RequestExpired => 400,
+            Self::RequestEntityTooLarge => 413,
             Self::UnsupportedMediaType => 415,
             Self::ResourceNotFound => 404,
             Self::ResourceConflict => 409,
@@ -86,6 +91,12 @@ mod tests {
         assert_eq!(AwsErrorCode::PreconditionFailed.status_code(), 412);
         assert_eq!(AwsErrorCode::IncompleteSignature.status_code(), 403);
         assert_eq!(AwsErrorCode::RequestExpired.status_code(), 400);
+        assert_eq!(AwsErrorCode::Validation.status_code(), 400);
+        assert_eq!(AwsErrorCode::Validation.as_str(), "ValidationException");
+        assert_eq!(
+            AwsErrorCode::RequestEntityTooLarge.as_str(),
+            "RequestEntityTooLargeException"
+        );
         assert_eq!(AwsErrorCode::Service.error_type(), "Server");
     }
 }

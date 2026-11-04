@@ -111,7 +111,7 @@ async fn create_valida_parametros() {
     bad_mem.memory_size = 127;
     assert!(matches!(
         fm.create_function(bad_mem).await,
-        Err(ManagerError::InvalidParameter {
+        Err(ManagerError::Validation {
             field: "memory_size",
             ..
         })

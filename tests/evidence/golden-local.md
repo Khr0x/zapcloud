@@ -1,5 +1,27 @@
 # Golden compatibility — evidencia local
 
+## 2026-10-17/18 — captura AWS y comparación local
+
+Se capturó la referencia AWS en `us-east-2`/`x86_64` con AWS CLI 2.17.27, SDK JS 3.1137.0,
+Boto3/Botocore 1.43.99 y Node v24.16.0: **96/96 PASS**. La referencia revisada quedó en
+`tests/golden/aws-reference.json` (`reference_status: reviewed`).
+
+La primera pasada encontró 24 divergencias de expectativa, repetidas en los tres clientes:
+AWS devuelve `ValidationException` para memoria/timeout fuera de rango,
+`RequestEntityTooLargeException` para payload excedido, y la cuenta de prueba limita
+`MemorySize` a 3008 MB. El fixture mínimo no decodificaba respuestas chunked del Runtime
+API; ahora las decodifica. Las expectativas se alinearon con AWS y el RFC §35/§70/§71 se
+actualizó.
+
+La comparación del 3 de noviembre de 2026 detectó otra divergencia en las 12
+respuestas exitosas de `DeleteFunction`. AWS devuelve `Content-Type: application/json`
+en el `204` con cuerpo vacío. La API local añade ese encabezado y el test HTTP
+verifica los tres elementos de la respuesta.
+
+Límites: una región y una arquitectura; ZIP de 50 MiB, async, variables de entorno,
+`/init/error` y schema completo siguen pendientes. El job `golden` de CI Linux x86_64 debe
+acreditarse en el próximo push.
+
 ## 2026-09-26 — ampliación a 32 casos
 
 macOS 26.6.2 ARM64: **32 casos × 3 clientes = 96 aprobadas, 0 fallidas, 0 omitidas**.

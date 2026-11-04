@@ -9,6 +9,7 @@
 //! `ManagerError` tipado. El mapeo a los errores observables de AWS (§71) lo
 //! hace `api-lambda`:
 //!   InvalidParameter → InvalidParameterValueException
+//!   Validation       → ValidationException (límites de memoria/timeout)
 //!   NotFound         → ResourceNotFoundException
 //!   Conflict         → ResourceConflictException
 //!   PreconditionFailed → PreconditionFailedException
@@ -41,6 +42,11 @@ const ZIP_MEDIA_TYPE: &str = "application/zip";
 pub enum ManagerError {
     #[error("parámetro inválido '{field}': {message}")]
     InvalidParameter {
+        field: &'static str,
+        message: String,
+    },
+    #[error("validación fallida '{field}': {message}")]
+    Validation {
         field: &'static str,
         message: String,
     },

@@ -207,12 +207,16 @@ async fn delete_function(
     State(state): State<ApiState>,
     Path(name): Path<String>,
     RawQuery(raw_query): RawQuery,
-) -> Result<StatusCode, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     let query: QualifierQuery = parse_query(raw_query)?;
     let name = resolve_name(&state.config, &name, query.qualifier)?;
     state.manager.delete_function(&name).await?;
     state.invoker.invalidate_function(&name).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(header::CONTENT_TYPE, "application/json")],
+        (),
+    ))
 }
 
 async fn update_function_code(
@@ -277,7 +281,7 @@ async fn invoke(
     require_invoke_content_type(&headers)?;
     let payload = to_bytes(request.into_body(), INVOKE_BODY_LIMIT)
         .await
-        .map_err(|_| ApiError::new(AwsErrorCode::RequestTooLarge, "payload mayor de 6 MB"))?;
+        .map_err(|_| ApiError::new(AwsErrorCode::RequestEntityTooLarge, "payload mayor de 6 MB"))?;
     serde_json::from_slice::<serde_json::Value>(&payload).map_err(|e| {
         ApiError::new(
             AwsErrorCode::InvalidRequestContent,
