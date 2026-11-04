@@ -39,10 +39,10 @@ pub(crate) fn unpack_code(bytes: Vec<u8>, dest: &Path) -> Result<()> {
 
         // Zip-slip: `enclosed_name` devuelve None si la ruta escapa del destino
         // (absoluta o con `..`). Rechazamos esas entradas (§82).
-        let rel = entry
-            .enclosed_name()
-            .map(|p| p.to_path_buf())
-            .ok_or_else(|| anyhow!("entrada de ZIP con ruta insegura: {}", entry.name()))?;
+        let rel = entry.enclosed_name().ok_or_else(|| {
+            let name = entry.name().unwrap_or_else(|_| "<nombre inválido>".into());
+            anyhow!("entrada de ZIP con ruta insegura: {name}")
+        })?;
         let out_path = dest.join(&rel);
 
         if entry.is_dir() {

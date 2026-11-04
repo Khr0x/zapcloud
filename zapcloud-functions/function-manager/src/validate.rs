@@ -197,10 +197,8 @@ fn validate_deployment_zip_with_limit(
             .by_index(index)
             .map_err(|e| invalid(format!("no se pudo leer una entrada del ZIP: {e}")))?;
         let path = entry.enclosed_name().ok_or_else(|| {
-            invalid(format!(
-                "entrada de ZIP con ruta insegura: {}",
-                entry.name()
-            ))
+            let name = entry.name().unwrap_or_else(|_| "<nombre inválido>".into());
+            invalid(format!("entrada de ZIP con ruta insegura: {name}"))
         })?;
 
         if !entry.is_dir() {
@@ -321,6 +319,12 @@ mod tests {
         )
         .is_err());
         assert!(validate_deployment_zip(b"no-es-zip", "nodejs22.x").is_err());
-        assert!(validate_deployment_zip(&zip(&[("../x.js", b"bad")]), "nodejs22.x").is_err());
+        let error =
+            validate_deployment_zip(&zip(&[("../x.js", b"bad")]), "nodejs22.x").unwrap_err();
+        assert!(matches!(
+            error,
+            ManagerError::InvalidParameter { field: "code", message }
+                if message == "entrada de ZIP con ruta insegura: ../x.js"
+        ));
     }
 }
