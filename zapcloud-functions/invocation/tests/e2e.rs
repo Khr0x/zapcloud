@@ -103,6 +103,22 @@ async fn setup_full(
 }
 
 #[tokio::test]
+async fn invocacion_rechaza_zip_que_escapa_del_task_root() {
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    zip.start_file("../bootstrap", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(b"invalid bootstrap").unwrap();
+    let invoker = setup(PROVIDED, zip.finish().unwrap().into_inner()).await;
+
+    let result = invoker.invoke("echo", b"{}").await;
+    assert!(matches!(
+        result,
+        Err(InvocationError::InvalidArtifact(message))
+            if message == "entrada de ZIP con ruta insegura: ../bootstrap"
+    ));
+}
+
+#[tokio::test]
 async fn desempaqueta_ejecuta_y_reusa_warm() {
     let invoker = setup(PROVIDED, build_zip()).await;
 
