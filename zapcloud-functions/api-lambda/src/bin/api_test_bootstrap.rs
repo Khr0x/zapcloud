@@ -75,10 +75,37 @@ fn request(api: &str, method: &str, path: &str, body: &[u8]) -> (String, Vec<u8>
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
         .expect("HTTP response completa");
-    (
-        String::from_utf8_lossy(&response[..split]).into_owned(),
-        response[split + 4..].to_vec(),
-    )
+    let headers = String::from_utf8_lossy(&response[..split]).into_owned();
+    let raw_body = &response[split + 4..];
+    let body = if header(&headers, "transfer-encoding")
+        .is_some_and(|value| value.eq_ignore_ascii_case("chunked"))
+    {
+        decode_chunked(raw_body).expect("cuerpo chunked completo")
+    } else {
+        raw_body.to_vec()
+    };
+    (headers, body)
+}
+
+/// El Runtime API de AWS puede responder con `Transfer-Encoding: chunked`
+/// cuando el evento es grande; sin decodificarlo, serde_json recibe los
+/// tamaños de chunk como si fueran JSON y el evento se pierde.
+fn decode_chunked(mut data: &[u8]) -> Option<Vec<u8>> {
+    let mut body = Vec::new();
+    loop {
+        let line_end = data.windows(2).position(|window| window == b"\r\n")?;
+        let line = std::str::from_utf8(&data[..line_end]).ok()?;
+        let size = usize::from_str_radix(line.split(';').next()?.trim(), 16).ok()?;
+        data = &data[line_end + 2..];
+        if size == 0 {
+            return Some(body);
+        }
+        if data.len() < size + 2 {
+            return None;
+        }
+        body.extend_from_slice(&data[..size]);
+        data = &data[size + 2..];
+    }
 }
 
 fn header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {

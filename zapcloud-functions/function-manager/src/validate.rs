@@ -129,7 +129,7 @@ pub fn validate_memory(memory_size: i64) -> Result<(), ManagerError> {
     if (MEMORY_MIN_MB..=MEMORY_MAX_MB).contains(&memory_size) {
         Ok(())
     } else {
-        Err(ManagerError::InvalidParameter {
+        Err(ManagerError::Validation {
             field: "memory_size",
             message: format!("memoria fuera de rango: {memory_size} (permitido {MEMORY_MIN_MB}–{MEMORY_MAX_MB} MB)"),
         })
@@ -140,7 +140,7 @@ pub fn validate_timeout(timeout: i64) -> Result<(), ManagerError> {
     if (TIMEOUT_MIN_S..=TIMEOUT_MAX_S).contains(&timeout) {
         Ok(())
     } else {
-        Err(ManagerError::InvalidParameter {
+        Err(ManagerError::Validation {
             field: "timeout",
             message: format!(
                 "timeout fuera de rango: {timeout} (permitido {TIMEOUT_MIN_S}–{TIMEOUT_MAX_S} s)"
