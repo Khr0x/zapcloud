@@ -1456,14 +1456,14 @@ timeout    = 30s
 
 | Límite | Valor AWS | Se aplica en | Violación → error AWS |
 |---|---|---|---|
-| Payload síncrono (req+resp) | 6 MB | Invoke `RequestResponse` | `RequestTooLargeException` (413) |
-| Payload asíncrono | 1 MB | Invoke `Event` | `RequestTooLargeException` (413) |
+| Payload síncrono (req+resp) | 6 MB | Invoke `RequestResponse` | `RequestEntityTooLargeException` (413) |
+| Payload asíncrono | 1 MB | Invoke `Event` | `RequestEntityTooLargeException` (413) |
 | Package zip (subida directa) | 50 MB | Create/UpdateFunctionCode | `InvalidParameterValueException` |
 | Package descomprimido (code+layers) | 250 MB | Create/Update | `InvalidParameterValueException` |
 | Container image | 10 GB | Create (Image) | `InvalidParameterValueException` |
 | `/tmp` (ephemeral) | 512 MB def · 512–10240 MB | Create/Update config | `InvalidParameterValueException` |
-| Memoria | 128–10240 MB, pasos de 1 MB | Create/Update config | `InvalidParameterValueException` |
-| Timeout (config) | 1–900 s | Create/Update config | `InvalidParameterValueException` |
+| Memoria | 128–10240 MB, pasos de 1 MB | Create/Update config | `ValidationException` |
+| Timeout (config) | 1–900 s | Create/Update config | `ValidationException` |
 | Variables de entorno (total) | 4 KB | Create/Update config | `InvalidParameterValueException` |
 | Layers | ≤ 5, y ≤ 250 MB descomprimido con el code | Create/Update config | `InvalidParameterValueException` |
 | Reserved concurrency | ≤ cuenta − 100 unreserved | PutFunctionConcurrency | `InvalidParameterValueException` |
@@ -1473,7 +1473,9 @@ timeout    = 30s
 ## Detalles sutiles de comportamiento
 
 - **Timeout de ejecución NO es un error de API.** Al exceder el timeout, Invoke devuelve **200 OK** con `FunctionError: Unhandled` y `errorMessage` exacto `Task timed out after 30.05 seconds`. Devolver 500 o un error HTTP rompe la compatibilidad observable.
-- **Payload: mismo error, umbral distinto.** Sync (6 MB) y async (1 MB) devuelven ambos `RequestTooLargeException`, pero con límites diferentes.
+- **Payload: mismo error, umbral distinto.** Sync (6 MB) y async (1 MB) devuelven ambos `RequestEntityTooLargeException`, pero con límites diferentes.
+- **Cuota de memoria:** la captura AWS del 2026-10-17 en una cuenta con cuota por defecto mostró `MemorySize ≤ 3008`; 10240 MB exige una cuota aumentada. El límite observable depende de la cuenta, no solo del contrato del API.
+- **Validación de configuración:** `MemorySize`/`Timeout` fuera de rango devuelven `ValidationException` (HTTP 400) en la frontera JSON, no `InvalidParameterValueException`. La validación del cliente puede ocultar este error antes de enviar la request.
 
 ## Fijos por defecto, configurables con advertencia
 
@@ -2651,12 +2653,12 @@ límites (ver eje abajo)
 Eje de límites (no solo happy paths): enviar cada límite del §35 en su borde y comparar el error y el status contra AWS real.
 
 ```text
-- payload sync de 6 MB + 1 byte      → RequestTooLargeException (413)
-- payload async de 1 MB + 1 byte     → RequestTooLargeException (413)
+- payload sync de 6 MB + 1 byte      → RequestEntityTooLargeException (413)
+- payload async de 1 MB + 1 byte     → RequestEntityTooLargeException (413)
 - package zip de 50 MB + 1           → InvalidParameterValueException
 - env vars de 4 KB + 1               → InvalidParameterValueException
-- MemorySize = 127                   → InvalidParameterValueException
-- Timeout = 901                      → InvalidParameterValueException
+- MemorySize = 127                   → ValidationException
+- Timeout = 901                      → ValidationException
 - función que excede su timeout      → 200 + FunctionError=Unhandled,
                                         "Task timed out after N.NN seconds"
 ```
@@ -2672,7 +2674,8 @@ ResourceNotFoundException
 ResourceConflictException
 PreconditionFailedException
 InvalidParameterValueException
-RequestTooLargeException
+ValidationException
+RequestEntityTooLargeException
 TooManyRequestsException
 ServiceException
 ```

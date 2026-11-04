@@ -122,11 +122,11 @@ afirmaciones actuales en comportamiento verificable.
 |---|---|---|---|
 | CI general | ✅ | `fmt`, `check`, Clippy y tests del workspace corren en cada PR, sin skips silenciosos | Workflow separado de `runtimes.yml`; skips explícitos y visibles |
 | Runtime API | ✅ subset (sin X-Ray/ClientContext/Init-error) | Se emiten los headers de invocación requeridos y se respetan deadline/ARN | E2E Linux con RIC Node y Python reales |
-| Golden compatibility | 🟡 sin referencia AWS; faltan ZIP 50 MiB y async (env vars en paso 13) | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | Fixtures/versiones documentadas contra AWS/RIE |
+| Golden compatibility | 🟡 referencia AWS capturada (96/96); faltan ZIP 50 MiB, async y env vars | La matriz CLI + SDK JS + SDK Python verifica status, headers, errores, límites y `FunctionError` | `tests/golden/aws-reference.json` + comparación local `matched` |
 | Runtime distribution | ✅ (PR #23) | `ensure` compara el estado deseado, repara corrupción y permite upgrade/rollback atómicos | Tests de índice, digest, tree hash y recuperación |
 | Publicación | ✅ | El merge matricial actualiza una sola entrada por fragmento o se hace en un job serial | Test que reconstruye dos publicaciones concurrentes |
 | Seguridad process | ✅ | `auth=none` solo en loopback/opt-in inseguro; entorno hijo allowlisted; grupo de procesos limpiable | Test negativo de bind público y de fuga de credenciales |
-| Semántica de ejecución | 🟡 `MemorySize` declarado no soportado; falta referencia AWS de errores | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura y payload en límite |
+| Semántica de ejecución | 🟡 `MemorySize` declarado no soportado; referencia AWS de errores capturada | Arquitectura incompatible se rechaza; timeout/memoria se aplican o se declaran no soportados; errores siguen el contrato AWS | Tests de timeout, arquitectura, payload en límite y errores AWS |
 | Supply chain | ✅ (PR #23) | Lockfiles/hashes obligatorios, imágenes/actions fijadas por digest y SBOM inválido bloquea publicación | Artefactos reproducibles y gate de publicación |
 | Operación mínima | ✅ (PR #23) | Índice disponible en instalación nueva, GC/cuotas y recuperación documentados | Prueba de instalación desde binario y de presión de disco |
 
@@ -151,8 +151,11 @@ Los bundles rechazan arquitectura distinta al host en cold start; timeout y
 payload tienen E2E. `MemorySize` se declara no soportado en process/T1: `serve`
 lo avisa al arrancar (`memory_limit=not-enforced`) y el E2E
 `memory_size_no_se_aplica_en_process_mode` fija el comportamiento hasta v0.2 (paso 18).
-La referencia AWS revisada aún no está capturada, por lo que semántica y golden
-no se declaran cerradas.
+La referencia AWS se capturó el 2026-10-17/18 en `us-east-2`/`x86_64` (96/96) y la matriz
+local contra esa referencia termina `matched`. La captura corrigió los nombres
+`ValidationException`/`RequestEntityTooLargeException`, el borde de memoria 3008 MB de la
+cuenta de prueba y el parser chunked del fixture. Semántica y golden siguen 🟡 por
+`MemorySize` no aplicado y por ZIP 50 MiB, async y env vars.
 
 **Seguridad process (gate acreditado):** `auth=none` se rechaza fuera de loopback al cargar la
 configuración, antes del preflight, almacenamiento o bind. La excepción explícita es
@@ -194,25 +197,29 @@ y [CI general verde](https://github.com/Khr0x/zapcloud/actions/runs/35754499375)
 integrado en `main`. Ambos RIC reales pasan; la instalación Python ahora fija su ABI 3.13
 también en hosts Linux nativos.
 
-**Golden compatibility (base local; gate abierto):** [tests/golden/](tests/golden/README.md)
+**Golden compatibility (referencia AWS capturada; gate abierto):** [tests/golden/](tests/golden/README.md)
 comparte 32 casos entre AWS CLI v2, SDK JS v3 y Boto3 (96 comprobaciones): CRUD,
 Invoke/FunctionError, timeout y recuperación, JSON inválido, bordes de payload/configuración,
-paginación, tamaño de respuesta y salida del bootstrap en Init.
-CI ejecuta la matriz contra un daemon aislado con SigV4 y conserva un reporte de versiones,
-procedencia y resultados. La suite detectó y corrigió el rechazo de
-`application/octet-stream` en Invoke, formato utilizado por el SDK JS. La ampliación
-corrigió tres divergencias: `MaxItems` de 51–10000 se rechazaba; una respuesta de más de
-2 MiB acababa en timeout (límite por defecto de axum) en lugar de 6 MiB +
-`Function.ResponseSizeTooLarge`; y un bootstrap que terminaba en Init esperaba 10 s y
-devolvía 500 en lugar de 200 + `Runtime.ExitError`.
+paginación, tamaño de respuesta y salida del bootstrap en Init. La referencia revisada vive
+en [tests/golden/aws-reference.json](tests/golden/aws-reference.json), capturada el
+2026-10-17/18 en `us-east-2`/`x86_64` con AWS CLI 2.17.27, SDK JS 3.1137.0 y
+Boto3/Botocore 1.43.99. La matriz local contra esa referencia termina
+`96 passed, 0 failed; AWS reference: matched`.
 
-Las expectativas iniciales proceden del contrato documentado; **no son una captura AWS**.
-El runner incluye captura manual explícita y comparación de referencias revisadas, pero
-no se ha ejecutado contra una cuenta AWS. Faltan esa evidencia, schema/errores completos,
-ZIP de 50 MiB y async; env vars llegan con el paso 13. Este avance no cierra el gate ni v0.1.2.
+La primera captura encontró 24 divergencias de expectativa, repetidas en los tres clientes:
+AWS devuelve `ValidationException` para memoria/timeout fuera de rango,
+`RequestEntityTooLargeException` para payload excedido, y la cuenta de prueba limita
+`MemorySize` a 3008 MB (10240 MB exige cuota aumentada). El fixture mínimo no decodificaba
+respuestas chunked del Runtime API; ahora las decodifica. Las expectativas y el RFC
+§35/§70/§71 se alinearon con AWS.
 
-Validación: [96 comprobaciones locales en macOS ARM64; 66 previas en Linux ARM64](tests/evidence/golden-local.md).
-Pendiente acreditar el nuevo job de CI Linux x86_64 y la referencia AWS.
+Siguen pendientes el ZIP de 50 MiB, la invocación asíncrona, las variables de entorno
+(paso 13), `/init/error` explícito y la ampliación de schema/errores/lifecycle. Por eso el
+gate sigue 🟡 y v0.1.2 no se cierra.
+
+Validación: [tests/evidence/golden-local.md](tests/evidence/golden-local.md) registra la
+captura AWS y la comparación local. El job `golden` de CI Linux x86_64 debe acreditarse en
+el próximo push.
 
 **Publicación matricial (gate acreditado):** cada job publica en
 un índice temporal vacío y entrega un fragmento con una sola entrada

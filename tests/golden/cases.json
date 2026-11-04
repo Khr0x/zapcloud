@@ -6,7 +6,13 @@
       "https://docs.aws.amazon.com/lambda/latest/api/API_Invoke.html",
       "https://docs.aws.amazon.com/lambda/latest/api/API_CreateFunction.html",
       "docs/rfc/lambda-zapcloud.md#70-golden-compatibility-tests"
-    ]
+    ],
+    "account_constraints": {
+      "memory_max_mb": 3008,
+      "region": "us-east-2",
+      "captured_at": "2026-10-17",
+      "note": "La cuenta de prueba usa el máximo por defecto de Lambda; 10240 MB requiere una cuota aumentada."
+    }
   },
   "cases": [
     {
@@ -256,13 +262,14 @@
       "expect": {
         "status": 200,
         "body": {
-          "echo": {}
+          "size": 2
         },
         "headers": {
           "content-type": "application/json",
           "x-amz-executed-version": "$LATEST"
         }
       },
+      "payload": "{\"response_bytes\":2}",
       "payload_bytes": 6291456
     },
     {
@@ -273,9 +280,9 @@
       },
       "expect": {
         "status": 413,
-        "error": "RequestTooLargeException",
+        "error": "RequestEntityTooLargeException",
         "headers": {
-          "x-amzn-errortype": "RequestTooLargeException"
+          "x-amzn-errortype": "RequestEntityTooLargeException"
         },
         "body": {
           "message": "$message"
@@ -435,9 +442,9 @@
       },
       "expect": {
         "status": 400,
-        "error": "InvalidParameterValueException",
+        "error": "ValidationException",
         "headers": {
-          "x-amzn-errortype": "InvalidParameterValueException"
+          "x-amzn-errortype": "ValidationException"
         },
         "body": {
           "message": "$message"
@@ -452,9 +459,9 @@
       },
       "expect": {
         "status": 400,
-        "error": "InvalidParameterValueException",
+        "error": "ValidationException",
         "headers": {
-          "x-amzn-errortype": "InvalidParameterValueException"
+          "x-amzn-errortype": "ValidationException"
         },
         "body": {
           "message": "$message"
@@ -469,9 +476,9 @@
       },
       "expect": {
         "status": 400,
-        "error": "InvalidParameterValueException",
+        "error": "ValidationException",
         "headers": {
-          "x-amzn-errortype": "InvalidParameterValueException"
+          "x-amzn-errortype": "ValidationException"
         },
         "body": {
           "message": "$message"
@@ -486,9 +493,9 @@
       },
       "expect": {
         "status": 400,
-        "error": "InvalidParameterValueException",
+        "error": "ValidationException",
         "headers": {
-          "x-amzn-errortype": "InvalidParameterValueException"
+          "x-amzn-errortype": "ValidationException"
         },
         "body": {
           "message": "$message"
@@ -500,14 +507,14 @@
       "operation": "CreateFunction",
       "params": {
         "FunctionName": "$limits",
-        "MemorySize": 10240,
+        "MemorySize": 3008,
         "Timeout": 900
       },
       "expect": {
         "status": 201,
         "body": {
           "FunctionName": "$limits",
-          "MemorySize": 10240,
+          "MemorySize": 3008,
           "Timeout": 900
         },
         "headers": {

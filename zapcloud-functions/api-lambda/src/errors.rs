@@ -51,6 +51,9 @@ impl IntoResponse for ApiError {
 impl From<ManagerError> for ApiError {
     fn from(error: ManagerError) -> Self {
         match error {
+            ManagerError::Validation { .. } => {
+                Self::new(AwsErrorCode::Validation, error.to_string())
+            }
             ManagerError::InvalidParameter { .. }
             | ManagerError::Unsupported(_)
             | ManagerError::InvalidArtifact(_) => {
