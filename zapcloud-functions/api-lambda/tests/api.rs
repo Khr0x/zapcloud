@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Cursor, Read, Write};
 use std::path::PathBuf;
 
 use axum::body::{to_bytes, Body};
@@ -75,14 +75,27 @@ fn deployment_zip(tag: &str) -> Vec<u8> {
 }
 
 fn create_body(name: &str, runtime: &str) -> Vec<u8> {
+    create_body_with_zip(name, runtime, &STANDARD.encode(deployment_zip("v1")))
+}
+
+fn create_body_with_zip(name: &str, runtime: &str, zip_file: &str) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "FunctionName": name,
         "Runtime": runtime,
         "Role": "arn:aws:iam::000000000000:role/local",
         "Handler": "bootstrap",
-        "Code": { "ZipFile": STANDARD.encode(deployment_zip("v1")) }
+        "Code": { "ZipFile": zip_file }
     }))
     .unwrap()
+}
+
+fn stored_zip(bootstrap_bytes: usize) -> Vec<u8> {
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    writer.start_file("bootstrap", options).unwrap();
+    io::copy(&mut io::repeat(0).take(bootstrap_bytes as u64), &mut writer).unwrap();
+    writer.finish().unwrap().into_inner()
 }
 
 fn json_request(method: &str, uri: &str, body: Vec<u8>) -> Request<Body> {
@@ -165,6 +178,70 @@ fn signed_get(uri: &str) -> Request<Body> {
 async fn body_json(response: axum::response::Response) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[tokio::test]
+async fn create_y_update_aplican_limite_zip_de_50_mib() {
+    const LIMIT: usize = 50 * 1024 * 1024;
+    const FUNCTIONS: &str = "/2015-03-31/functions";
+    const UPDATE: &str = "/2015-03-31/functions/zip-update/code";
+    let auth = AuthMode::SigV4(SigV4Verifier::lambda_local(Credentials::new(
+        "local", "local",
+    )));
+    let (app, _temp) = setup_with_auth(auth).await;
+
+    let seed = create_body_with_zip(
+        "zip-update",
+        "provided.al2023",
+        &STANDARD.encode(stored_zip(1)),
+    );
+    let created = app
+        .clone()
+        .oneshot(signed_request("POST", FUNCTIONS, seed, true))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    // Stored mantiene el tamaño del archivo más el overhead fijo del contenedor ZIP.
+    let zip_overhead = stored_zip(0).len();
+    for size in [LIMIT, LIMIT + 1] {
+        let zip = stored_zip(size - zip_overhead);
+        assert_eq!(zip.len(), size);
+        let encoded_zip = STANDARD.encode(zip);
+
+        for (method, uri, success) in [
+            ("POST", FUNCTIONS, StatusCode::CREATED),
+            ("PUT", UPDATE, StatusCode::OK),
+        ] {
+            let request_body = if method == "POST" {
+                create_body_with_zip(&format!("zip-{size}"), "provided.al2023", &encoded_zip)
+            } else {
+                serde_json::to_vec(&json!({ "ZipFile": encoded_zip })).unwrap()
+            };
+            let response = app
+                .clone()
+                .oneshot(signed_request(method, uri, request_body, true))
+                .await
+                .unwrap();
+            if size == LIMIT {
+                assert_eq!(response.status(), success, "{method} {uri}");
+                assert_eq!(body_json(response).await["CodeSize"], LIMIT);
+            } else {
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{method} {uri}");
+                assert_eq!(
+                    response.headers()["x-amzn-errortype"],
+                    "InvalidParameterValueException"
+                );
+                let body = body_json(response).await;
+                assert!(
+                    body["message"].as_str().unwrap().contains(&format!(
+                        "zip demasiado grande: {size} bytes (máximo {LIMIT})"
+                    )),
+                    "{method} {uri}: {body}"
+                );
+            }
+        }
+    }
 }
 
 #[tokio::test]
